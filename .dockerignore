@@ -1,0 +1,32 @@
+# Keep the build context small and never ship secrets into an image layer.
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+**/coverage
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+*.log
+logs
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Test + E2E material is not needed to run the app.
+**/tests
+**/e2e
+**/*.test.ts
+**/*.test.tsx
+**/playwright-report
+**/test-results
+**/.eslintcache
+
+# Docs and agent contract are not runtime assets.
+docs
+AGENTS.md
+README.md

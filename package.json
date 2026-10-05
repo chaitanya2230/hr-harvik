@@ -1,0 +1,30 @@
+{
+  "name": "harvik-hr",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Harvik Technologies - Internal HR Dashboard (HR Management System)",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "build": "npm run build --workspace=apps/api && npm run build --workspace=apps/web",
+    "start": "npm run start --workspace=apps/api",
+    "worker": "npm run worker --workspace=apps/api",
+    "seed": "npm run seed --workspace=apps/api",
+    "test": "npm run test --workspace=apps/api",
+    "test:coverage": "npm run test:coverage --workspace=apps/api",
+    "lint": "npm run lint --workspace=apps/api && npm run lint --workspace=apps/web",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2"
+  }
+}

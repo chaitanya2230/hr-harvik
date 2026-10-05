@@ -1,0 +1,174 @@
+# ---------------------------------------------------------------------------
+# Harvik Technologies — Internal HR Dashboard (AGENTS.md §16 P0 foundation)
+#
+#   docker compose up --build      → app at http://localhost:8080
+#   docker compose run --rm seed   → demo users + departments
+#
+# Services: nginx (SPA + /api proxy), api, worker, mongo (rs0), redis.
+# ---------------------------------------------------------------------------
+
+name: harvik-hr
+
+# AGENTS.md §2.7 — real secrets live in `.env`, never in this file.
+# `.env.example` ships placeholders that `src/config/env.ts` deliberately
+# rejects, so the stack refuses to boot until they are replaced.
+x-app-env: &app-env
+  NODE_ENV: production
+  PORT: "4000"
+  MONGO_URI: mongodb://mongo:27017/harvik_hr?replicaSet=rs0
+  REDIS_URL: redis://redis:6379
+  UPLOAD_DIR: /data/uploads
+  MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?generate a real secret — see README}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?generate a real secret — see README}
+  JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+  JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
+  FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?must be base64 of exactly 32 bytes}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASS: ${SMTP_PASS:-}
+  MAIL_FROM: ${MAIL_FROM:-hr@harviktech.com}
+  APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  COMPANY_TIMEZONE: ${COMPANY_TIMEZONE:-Asia/Kolkata}
+  COMPANY_NAME: ${COMPANY_NAME:-Harvik Technologies}
+  # Exactly one hop: nginx is the only thing in front of the API.
+  TRUST_PROXY_HOPS: "1"
+
+services:
+  # -------------------------------------------------------------------------
+  # AGENTS.md §3 — MongoDB Community 7.x as a single-node replica set named
+  # `rs0`, because exit processing, licence seat assignment and asset assignment
+  # history all require transactions.
+  # -------------------------------------------------------------------------
+  mongo:
+    image: mongo:7.0.14
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      # Reports ok once the node itself is up; `rs-init` then forms the set.
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  # One-shot job: initiates the replica set exactly once, then exits 0.
+  # `restart: "no"` keeps Compose from looping it.
+  rs-init:
+    image: mongo:7.0.14
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: "no"
+    entrypoint:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        mongosh --host mongo:27017 --quiet --eval '
+          try {
+            rs.status();
+          } catch (e) {
+            rs.initiate({_id: "rs0", members: [{_id: 0, host: "mongo:27017"}]});
+          }
+        '
+        echo "waiting for PRIMARY..."
+        until mongosh --host mongo:27017 --quiet --eval 'db.hello().isWritablePrimary' | grep -q true; do
+          sleep 1
+        done
+        echo "replica set rs0 is PRIMARY"
+
+  # -------------------------------------------------------------------------
+  # AGENTS.md §3 — Redis 7 backs BullMQ, the dashboard cache, rate limiting and
+  # the refresh-token denylist.
+  # -------------------------------------------------------------------------
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # API (Node + Express). Health is `/ready`, which verifies MongoDB AND Redis.
+  # -------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment: *app-env
+    ports:
+      - "${API_PORT:-4000}:4000"
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      rs-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # BullMQ worker (AGENTS.md §3, §8.12). No HTTP port; needs Redis.
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["node", "apps/api/dist/worker.js"]
+    environment: *app-env
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      rs-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # `npm run seed`. Run explicitly:  docker compose run --rm seed
+  # -------------------------------------------------------------------------
+  seed:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["node", "apps/api/dist/seed/index.js"]
+    environment: *app-env
+    profiles: ["tools"]
+    depends_on:
+      rs-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # -------------------------------------------------------------------------
+  # nginx serves the Vite build and reverse-proxies /api (AGENTS.md §3).
+  # The image is built from apps/web/Dockerfile: Vite build + nginx runtime.
+  # -------------------------------------------------------------------------
+  nginx:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "${APP_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
+  redis-data:
+  uploads:

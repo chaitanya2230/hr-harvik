@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment - NEVER commit real secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Uploads / generated artifacts (never publicly served)
+uploads/
+data/
+*.log
+logs/
+
+# Test + coverage output
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Caches
+.cache/
+.vite/
+.eslintcache
+.mongodb-binaries/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# PM / temp
+*.tmp
+*.pid
