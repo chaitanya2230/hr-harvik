@@ -96,6 +96,18 @@ const envSchema = z.object({
    */
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(1),
 
+  /**
+   * Backing store for the AGENTS.md §11 rate limiters.
+   *
+   * `auto` (the default, and what every deployment uses) resolves to `memory`
+   * under NODE_ENV=test and `redis` everywhere else. `redis` / `memory` force a
+   * specific store so the production Redis-backed path can be exercised against
+   * a real Redis server (see docs/DECISIONS.md D-16). Forcing `redis` does not
+   * weaken the limit itself — window, limit, headers and error envelope are
+   * identical; only where the counter is stored differs.
+   */
+  RATE_LIMIT_STORE: z.enum(['auto', 'memory', 'redis']).default('auto'),
+
   // --- Company settings defaults ---
   COMPANY_TIMEZONE: z.string().min(1).default('Asia/Kolkata'),
   COMPANY_NAME: z.string().min(1).default('Harvik Technologies'),
@@ -118,3 +130,14 @@ export type Env = typeof env;
 
 export const isProduction = env.NODE_ENV === 'production';
 export const isTest = env.NODE_ENV === 'test';
+
+/**
+ * Resolved AGENTS.md §11 rate-limit store: `memory` or `redis`.
+ *
+ * `auto` resolves to `memory` under NODE_ENV=test and `redis` everywhere else,
+ * which is what every deployment uses. The explicit values exist so the
+ * production Redis path can also be covered by the suite when a real Redis
+ * server is available (see docs/DECISIONS.md D-16).
+ */
+export const RATE_LIMIT_STORE: 'memory' | 'redis' =
+  env.RATE_LIMIT_STORE === 'auto' ? (isTest ? 'memory' : 'redis') : env.RATE_LIMIT_STORE;

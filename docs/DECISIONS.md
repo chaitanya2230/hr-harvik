@@ -49,24 +49,38 @@ Production Compose runs the same topology (`mongo:7.0.14` with
 `--replSet rs0` plus a one-shot `rs-init` service), so the test and production
 database semantics match.
 
-## D-04 — Redis is an in-memory double in tests
+## D-04 — Redis is an in-memory double by default, real Redis 7 in `npm run test:docker`
 
-*Status: accepted with a known gap · P0*
+*Status: gap closed · P0*
 
-Redis publishes no Windows build, and Docker/WSL were unavailable on the
-development machine. `tests/setup/setup.ts` injects `ioredis-mock` through the
-`setRedisClient()` seam in `src/db/redis.ts`.
+Originally Redis was *only* an in-memory double, because Redis publishes no
+Windows build and `rate-limit-redis` needs Lua evaluation (`EVALSHA`) that
+`ioredis-mock` cannot perform. Docker/WSL are now available on the development
+machine, so the gap is closed by running the **same suites** a second time
+against the compose services:
 
-What is genuinely exercised: refresh-token denylisting, denylist TTL handling,
-dashboard cache helpers — all of which use plain `GET`/`SET`/`DEL`/`EXISTS`/
-`INCR`/`TTL`/`SCAN`/`FLUSHALL`.
+```
+docker compose up -d mongo rs-init redis
+npm run test:docker          # HR_DOCKER_TESTS=1, vitest.docker.config.ts
+```
 
-What is **not** exercised: `rate-limit-redis` and BullMQ, both of which require
-Lua evaluation (`EVALSHA`) that `ioredis-mock` cannot perform. Consequently
-`src/middleware/rateLimit.ts` selects `MemoryStore` when `NODE_ENV === 'test'`
-and `RedisStore` otherwise. The window, limit, `skipSuccessfulRequests` and the
-429 envelope are identical in both modes, so the rate-limit tests assert
-production behaviour; only the backing store differs. See D-11.
+`HR_DOCKER_TESTS=1` makes `tests/setup/setup.ts` skip the mock entirely (no
+`setRedisClient()` call, so `getRedis()` builds a real `ioredis` client from
+`REDIS_URL`) and sets `RATE_LIMIT_STORE=redis`. Nothing is skipped and no
+assertion is relaxed — 175/175 pass in both modes.
+
+What the default (mock) mode genuinely exercises: refresh-token denylisting,
+denylist TTL handling and cache helpers, all of which use plain
+`GET`/`SET`/`DEL`/`EXISTS`/`INCR`/`TTL`/`SCAN`/`FLUSHALL`.
+
+What only `npm run test:docker` can exercise, and now does: `rate-limit-redis`
+(`RedisStore`) and the BullMQ queue keys. Verified by inspecting Redis during
+the run — the six per-IP buckets the rate-limit suite creates
+(`ratelimit:login:198.51.100.200`…`205`) are physically present in Redis 7.
+
+`RATE_LIMIT_STORE` (D-16) exists so this is a configuration choice rather than a
+`NODE_ENV` side effect. The window, limit, `skipSuccessfulRequests` and the 429
+envelope are identical in both stores; only the counter storage differs.
 
 ## D-05 — Rate-limit store is swappable, limit is not
 
@@ -220,12 +234,174 @@ consistent across API and worker.
 
 ---
 
+## D-16 — `RATE_LIMIT_STORE` makes the store an explicit configuration choice
+
+*Status: accepted · P0*
+
+`src/middleware/rateLimit.ts` used to branch on `NODE_ENV === 'test'` alone. That
+couples "which store" to "how the process was invoked", which makes the
+production `RedisStore` path impossible to run under a test runner.
+
+`RATE_LIMIT_STORE` (`auto` | `memory` | `redis`, default `auto`) replaces that
+implicit coupling. `auto` resolves to `memory` under `NODE_ENV=test` and `redis`
+everywhere else, so **every deployment keeps exactly the previous behaviour**.
+`redis` / `memory` exist only so a test run can force one store; `npm run
+test:docker` uses `redis` (D-04).
+
+This cannot be used to weaken §11: the limit (5/min/IP), the 60s window, the
+draft-7 headers and the 429 envelope are compiled into `loginLimiter` and are
+identical for both stores. Only where the counter lives differs.
+
+## D-17 — BullMQ queue names must not contain a colon
+
+*Status: accepted · P0*
+
+BullMQ builds its Redis keys as `bull:<queueName>:...` and therefore **rejects**
+a queue name containing `:` at `Worker` construction time:
+
+```
+Error: Queue name cannot contain :
+```
+
+Because P0 had no Redis server, this was invisible until the worker was first run
+against real Redis 7 — where it crash-looped on every start, because
+`MongoDB connected` was logged immediately before the throw. The names in
+`src/jobs/queues.ts` are now hyphen-separated (`harvik-maintenance`).
+
+`tests/unit/queues.test.ts` locks this in without needing Redis: it asserts no
+name contains `:` *and* constructs a real `Queue` for each name, which is the
+exact call that used to throw.
+
+## D-18 — nginx resolves the API upstream per request, not once at boot
+
+*Status: accepted · P0*
+
+The original `deploy/nginx.conf` used `proxy_pass http://api:4000`. nginx resolves
+a literal upstream host **once, at configuration load**, and caches the address
+for the life of the process. A container's IP changes whenever it is recreated,
+so after `docker compose up -d --build` replaced the `api` image, nginx kept
+proxying to the dead address and returned **502** until it was itself restarted —
+even though the container reported healthy.
+
+Fixed with Docker's embedded resolver and a variable upstream:
+
+```nginx
+resolver 127.0.0.11 valid=10s ipv6=off;
+set $api_upstream http://api:4000;
+proxy_pass $api_upstream;
+```
+
+Using a variable is what forces per-request resolution. The variable carries no
+URI component, so the original request URI is forwarded exactly as before.
+
+Verified by detaching the `api` container from the network and reconnecting it
+so it took a different address: nginx followed the new IP and served traffic
+within the `valid=10s` window **without being restarted**. The same test also
+showed the fix is honest rather than permissive — while the `api` DNS name was
+genuinely absent, nginx correctly returned 502 instead of silently using a
+cached address.
+
+## D-19 — Readiness probes are bounded so `/ready` cannot hang
+
+*Status: accepted · P0*
+
+Found by the Docker verification in D-18: after the API container's network was
+replaced, `GET /ready` stopped responding entirely — `/health` still returned
+200 while `/ready` never replied at all, and nothing was written to the log.
+Through nginx that surfaced as **504 Gateway Time-out**.
+
+`describe()` guarded each probe with a `readyState` check, but that is not
+sufficient: a driver only notices a dropped socket the next time it *uses* it, and
+reports itself connected until then. Once inside the probe, both clients can
+block forever:
+
+- mongoose sets no `socketTimeoutMS` (0 = no timeout), and
+  `serverSelectionTimeoutMS: 10_000` governs only *initial* server selection, so
+  an `admin().ping()` over a dead socket never returns.
+- ioredis is built with `enableOfflineQueue: true` and
+  `maxRetriesPerRequest: null`, so `PING` on a dead connection is queued
+  indefinitely rather than rejected.
+
+Each probe is now raced against a 3s timer (`PROBE_TIMEOUT_MS`) and a timeout is
+reported as `error: 'timeout'`, so `/ready` returns **503 quickly** instead of
+hanging. The timer is `unref`'d so a probe cannot hold the event loop open, and
+the sentinel is a `Symbol` rather than an `Error` subclass because `instanceof`
+is unreliable when the TypeScript target downlevels `class extends Error`.
+
+This makes `/ready` match its contract in AGENTS.md §11: a verdict, not a hang.
+`tests/integration/health.test.ts` pins it with a client whose `PING` never
+settles. That test was confirmed non-vacuous — with the bound removed it hangs
+until vitest kills it at 60s.
+
+Not changed: `socketTimeoutMS` on the application connection. Bounding *every*
+query would alter request semantics well beyond P0's remit; the readiness probe
+is the endpoint whose contract is "report a verdict".
+
+## D-20 — The API image must not copy `apps/api/node_modules`
+
+*Status: accepted · P0*
+
+`apps/api/Dockerfile` copied the workspace's `node_modules` into the runtime
+stage:
+
+```dockerfile
+COPY --from=build /repo/apps/api/node_modules ./node_modules   # removed
+```
+
+That path never exists. `npm ci --workspace=@harvik/api` performs a workspace
+install, which **hoists** dependencies to the repository root
+(`/repo/node_modules`) and leaves the workspace directory with at most a
+`node_modules/.bin` stub. The build therefore failed outright once Docker was
+available.
+
+The copy is unnecessary as well as broken: Node resolves modules by walking up
+the directory tree, and `dist/server.js` lives at `/repo/apps/api/dist/`, so the
+root tree is already in scope. Only the root `node_modules` is copied.
+
+## D-21 — The worker needs its own healthcheck, not the API's
+
+*Status: accepted · P0*
+
+`worker` is built `FROM` the API image, so it inherited the API image's
+`HEALTHCHECK`, which curls `/ready` on port 4000. `src/worker.ts` runs **no HTTP
+server** — AGENTS.md §4 gives it no such requirement — so the probe could only
+ever fail. The worker would have been reported `unhealthy` while doing its job
+perfectly, which in most orchestrators means a restart loop.
+
+`docker-compose.yml` now overrides it with a probe of what the worker actually
+depends on: an ioredis `PING`. Both are real failure signals for this process,
+and the worker cannot do anything at all without Redis.
+
+The override deliberately does **not** also check for the
+`bull:harvik-maintenance:repeat*` keys, even though those exist and would have
+looked like a stronger check. They are written once at boot, so a Redis
+`FLUSHALL` — which `npm run test:docker` performs — deletes them permanently
+while the worker keeps running perfectly. Docker does **not** restart a
+container that is merely `unhealthy` (only one that exits), so probing those keys
+wedged the worker indefinitely until a manual restart. That failure mode was hit
+for real during this verification and is exactly the kind of state a healthcheck
+must never create.
+
+Nothing is lost by dropping them: `bootstrap()` `await`s the `add` and the
+`catch` calls `process.exit(1)`, so a failed registration already terminates the
+process, and `restart: unless-stopped` *does* act on an exited container. The
+process-exit path is the correct signal for "could not register"; the healthcheck
+is for "is the dependency reachable".
+
+Keeping the inherited HTTP probe "just in case" would have been worse than
+useless: a worker that cannot serve HTTP must not be probed over HTTP.
+
+---
+
 ## Known gaps carried into later phases
 
 | Gap | Why | Owner |
 | --- | --- | --- |
-| `docker compose build` / `up` not executed | Docker Desktop cannot start on this host: WSL2 absent and the Windows *Virtual Machine Platform* feature is disabled (needs elevation + reboot). Backend log: `engine linux/wsl failed to start: checking preconditions: Virtual Machine Platform not enabled`. `docker compose config` does validate. | Must be run on a Docker-capable host before P0 is signed off |
-| BullMQ worker behaviour is unexercised by the suite | No Redis server available for Lua scripts (D-04) | P5/P7 — verify against real Redis 7 |
-| `rate-limit-redis` store is unexercised by the suite | Same as above. With no Redis, the app cannot even boot in production mode, because `RedisStore` issues `EVALSHA` during construction | P7 — verify against real Redis 7 |
+| ~~`docker compose build` / `up` not executed~~ | **CLOSED (P0).** WSL2 + Ubuntu installed, Docker Engine 29.8.2 running. Full stack builds and starts; MongoDB 7.0.14 `rs0` reaches PRIMARY with working commit *and* rollback transactions, Redis 7.4.11 ready, `/ready` reports both, nginx serves the SPA and proxies `/api`, seed runs in-container. Building and running it surfaced four latent defects — D-17, D-18, D-19, D-20 — plus the bogus worker healthcheck (D-21). | Closed |
+| ~~BullMQ worker unexercised~~ | **CLOSED (P0).** Worker connects to Redis 7 and is healthy. Functionally proven, not just registered: a job enqueued from a separate process was consumed cross-container, executed and completed (`attempts made: 1`; the handler's return-value timestamp matches the worker log line to the millisecond). | Closed |
+| ~~`rate-limit-redis` store unexercised~~ | **CLOSED (P0).** `npm run test:docker` runs the same 176 tests with `RATE_LIMIT_STORE=redis` against Redis 7 (D-04, D-16). Beyond the suite, the 5/min/IP limit, `skipSuccessfulRequests` and per-IP isolation were each measured against the live RedisStore through nginx, with the resulting per-IP bucket keys observed in Redis. | Closed |
+| ~~`/ready` could hang instead of answering~~ | **CLOSED (P0).** Probes are bounded (D-19); verified live by stopping MongoDB — 503 in 4–85 ms, `/health` unaffected. | Closed |
+| 403 over HTTP through the compose stack | **P0 ships no role-gated route.** Every P0 route is mounted with `requireAuth`; `requireRoles`/`requirePermission` are implemented but unused until P1 adds business routes. So 403 is structurally unreachable from the container — not weak, just not yet reachable. Enforcement is covered by `rbac-api.test.ts` (19 tests) against the real middleware. | P1 — re-verify over HTTP once the first guarded route exists |
 | Bank/licence field masking in list responses | The modules that own those fields are P2/P4 | P2, P4 |
 | Manager team scoping (recursive, depth 5) | Needs the employees module | P1 |
+| Playwright E2E specs | P8 deliverable; the web workspace has no unit-test runner yet | P8 |

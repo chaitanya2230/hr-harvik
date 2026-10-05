@@ -5,7 +5,7 @@ import rateLimit, {
   type Store,
 } from 'express-rate-limit';
 import RedisStore from 'rate-limit-redis';
-import { isTest } from '../config/env';
+import { RATE_LIMIT_STORE } from '../config/env';
 import { getRedis } from '../db/redis';
 import { ApiError, ErrorCode } from '../utils/errors';
 
@@ -16,15 +16,17 @@ type RedisScalarReply = boolean | number | string | Array<boolean | number | str
  * AGENTS.md §11 — rate limiting backed by Redis 7 so counters are shared
  * across API replicas.
  *
- * The automated test suite runs without a Redis server (Redis publishes no
- * Windows build and Docker/WSL are unavailable on this machine) and
- * `rate-limit-redis` needs Lua evaluation, which `ioredis-mock` cannot do. In
- * tests we therefore use `MemoryStore`. Everything under test — the window,
- * the limit, `skipSuccessfulRequests` and the error envelope — is identical;
- * only the backing store differs. See docs/DECISIONS.md.
+ * `RATE_LIMIT_STORE=auto` (default) resolves to `MemoryStore` under
+ * NODE_ENV=test and `RedisStore` everywhere else. The automated suite normally
+ * runs without a Redis server because `rate-limit-redis` needs Lua evaluation,
+ * which `ioredis-mock` cannot do; `npm run test:docker` re-runs the same suites
+ * against the real Redis 7 container with `RATE_LIMIT_STORE=redis` so the
+ * production path is covered too. Everything under test — the window, the
+ * limit, `skipSuccessfulRequests` and the error envelope — is identical for
+ * both stores. See docs/DECISIONS.md D-16.
  */
 const createStore = (prefix: string): Store => {
-  if (isTest) return new MemoryStore();
+  if (RATE_LIMIT_STORE === 'memory') return new MemoryStore();
 
   return new RedisStore({
     prefix,

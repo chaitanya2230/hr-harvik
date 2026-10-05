@@ -172,49 +172,87 @@ The seed never prints the demo password and never logs it.
 ## 8. Verification
 
 ```bash
-npm test          # 167 tests: unit + integration
-npm run lint      # eslint, api + web
-npm run build     # tsc (api) + vite build (web)
+npm test             # 176 tests / 13 files: unit + integration (mock Redis, real mongod 7)
+npm run test:docker  # the SAME 176 tests against the compose MongoDB + Redis 7
+npm run lint         # eslint, api + web
+npm run build        # tsc (api) + vite build (web)
 ```
+
+The web workspace has no unit-test runner yet; Playwright E2E is a P8
+deliverable (§16) and no specs exist at P0.
 
 ### Verification status
 
 | Check | Result |
 | --- | --- |
-| `npm test` — 167 unit + integration tests | pass |
+| `npm test` — 176 unit + integration tests, 13 files | pass |
+| `npm run test:docker` — same 176 tests, real Redis 7 + `RedisStore` | pass |
 | `npm run lint` — api and web | pass |
-| `npm run typecheck` — api src and tests | pass |
-| `npm run build` — api `tsc` and web `vite build` | pass |
-| `docker compose config` (client-side) | pass — 6 services resolved |
-| Auth over real HTTP against the compiled `dist/`, real `mongod` 7.0.14 replica set | pass — 33/33 checks |
-| `npm run seed` end-to-end, twice (idempotent) | pass |
-| **`docker compose build` / `up`** | **not verified** — see below |
+| `npm run typecheck` — api `tsconfig.json` and `tsconfig.test.json` | pass |
+| `npm run build` — api `tsc` and web `vite build` (91 modules, 298 kB JS) | pass |
+| `docker compose config` | pass — `mongo rs-init redis worker api nginx` |
+| `docker compose build` | pass |
+| `docker compose up -d --build` | pass — 6 services, all healthy |
+| MongoDB `rs0` reaches PRIMARY | pass — `stateStr=PRIMARY`, `isWritablePrimary=true`, `logicalSessionTimeoutMinutes=30` |
+| Multi-document transactions | pass — commit **and** rollback verified via the app's own mongoose |
+| Redis 7 readiness | pass — 7.4.11, `PING` → `PONG` |
+| `/health` and `/ready` | pass — `/ready` reports `mongo.ok` **and** `redis.ok` |
+| `/ready` fails fast (503, not a hang) when a dependency stops answering | pass — verified live: MongoDB stopped → 503 in 4–85 ms, `/health` still 200 |
+| Worker / BullMQ on real Redis | pass — worker healthy; a job enqueued from a separate process was consumed cross-container, executed and completed (`attempts made: 1`, return-value timestamp matches the worker log line exactly) |
+| Worker healthcheck cannot wedge the worker | pass — after `FLUSHALL` (which deletes the boot-time `repeat*` keys) the worker stayed **healthy / 0 failures** across 3+ intervals; a restart restored them. See D-21 |
+| nginx serves the SPA and proxies `/api` | pass — incl. SPA deep-link fallback and `/health`, `/ready` |
+| nginx survives an `api` container IP change | pass — followed `.2` → `.7` → `.6` with **no nginx restart** (D-18) |
+| Auth through nginx | pass — 47/47 checks: 401 envelope, all four roles, permission sets, `/me`, tampered JWT, cookie-only rejection |
+| Refresh rotation + replay + logout | pass — cookie rotates, old token replayed → 401, post-logout refresh → 401 (Redis denylist) |
+| Password policy §6 | pass — `<8` chars, digits-only, letters-only, wrong current password all rejected |
+| NoSQL operator injection | pass — `{$ne:null}` → 400 |
+| Wrong method on a POST-only route | pass — `GET/PUT/PATCH/DELETE` → 404 `NOT_FOUND`, handler never reached |
+| Login rate limit on the real `RedisStore` | pass — 5×401 then 429; blocked IP rejected even with the correct password; draft-7 `RateLimit` header present, legacy `X-RateLimit-*` absent |
+| `skipSuccessfulRequests` on the real `RedisStore` | pass — 8 consecutive valid logins all 200; full 5-failure budget intact afterwards |
+| Per-IP isolation on the real `RedisStore` | pass — host bucket exhausted to 429 while a second address independently got its own budget; both keys coexist in Redis |
+| Header hardening through nginx | pass — no `X-Powered-By`, Helmet CSP, `X-Request-Id` |
+| `/uploads/…` never publicly served (§13) | pass — direct guess 404, traversal 400 |
+| All four demo roles log in through nginx | pass |
+| `docker compose run --rm seed`, run twice | pass — 5 departments / 11 employees / 4 users, idempotent |
+| 403 over HTTP | **not reachable at P0** — see below |
 
-The Docker daemon cannot start on the machine this was built on. Docker Desktop's
-own backend log reports:
+> **403 is not reachable at P0 — stated plainly rather than papered over.**
+> Every P0 route is mounted with `requireAuth` only. `requireRoles` and
+> `requirePermission` exist and are correct, but no P0 route uses them, because
+> every role-gated business route belongs to P1 or later. So a 403 cannot occur
+> through the running container — not because authorisation is weak, but because
+> there is nothing yet that distinguishes an authenticated caller from an
+> unauthorised one. Enforcement is proven instead by
+> `tests/integration/rbac-api.test.ts` (19 tests) driving the real middleware.
+> The first P1 route behind `requireRoles` should be re-verified over HTTP.
 
+`npm run test:docker` needs the services up first:
+
+```bash
+docker compose up -d mongo rs-init redis
+npm run test:docker        # from apps/api
 ```
-starting engine: engine linux/wsl failed to start: checking preconditions:
-Virtual Machine Platform not enabled
-No virtualization available
-```
 
-WSL2 is not installed and the Windows *Virtual Machine Platform* optional feature
-is disabled; enabling it needs an elevated shell and a reboot. Until that is done,
-`docker compose up --build` cannot be executed here, so the containerised stack is
-**unverified** rather than verified. Run it on a Docker-capable host before
-signing P0 off.
+It runs the *same* suites with `HR_DOCKER_TESTS=1`, which skips the Redis mock
+and forces `RATE_LIMIT_STORE=redis`. No test is skipped and no assertion is
+relaxed — see `docs/DECISIONS.md` D-04 and D-16.
+
+> Running the suite from the Windows host against the containerised replica set
+> needs `directConnection=true` in `MONGO_URI`: `rs0`'s only member advertises
+> itself as `mongo:27017`, a name only resolvable inside the Docker network, so
+> a driver on the host fails with `ENOTFOUND mongo` when it follows the
+> topology. `npm run test:docker` applies this automatically.
 
 Test suite notes:
 
 - **Real MongoDB.** `tests/setup/global-setup.ts` starts an actual
   `mongod` 7.0.14 single-node replica set, so transactions are genuinely
-  available rather than mocked.
-- **Redis double.** Redis has no Windows build and Docker was unavailable during
-  development, so `ioredis-mock` is injected through `setRedisClient()`. Plain
-  commands (the refresh-token denylist, cache helpers) are genuinely exercised.
-  `rate-limit-redis` and BullMQ need Lua evaluation and are therefore **not**
-  covered — see `docs/DECISIONS.md` D-04.
+  available rather than mocked. `npm run test:docker` uses the containerised
+  `mongo:7.0.14` instead.
+- **Redis is a double only by default.** Plain commands (the refresh-token
+  denylist, cache helpers) are exercised through `ioredis-mock`.
+  `rate-limit-redis` and BullMQ need Lua evaluation, so they are covered by
+  `npm run test:docker` against real Redis 7 — see `docs/DECISIONS.md` D-04.
 - **Rate limiting is not relaxed.** The login limiter stays at 5/min/IP; tests
   vary the simulated client IP via `X-Forwarded-For` instead.
 
@@ -336,6 +374,10 @@ curl http://localhost:4000/ready    # {"status":"ready",...}       — 503 unles
 Both are excluded from API logging and from rate limiting so probes stay cheap.
 `/ready` returning 200 is the contract the API and worker containers use for
 readiness.
+
+`/ready` is bounded to ~3s per dependency and answers **503** rather than
+hanging if a probe stops responding, because neither driver bounds an in-flight
+command on a half-open socket. See `docs/DECISIONS.md` D-19.
 
 ---
 

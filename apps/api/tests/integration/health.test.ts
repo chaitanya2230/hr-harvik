@@ -120,6 +120,34 @@ describe('health endpoints (AGENTS.md §11)', () => {
       expect(response.body.checks.redis.ok).toBe(false);
     });
 
+    it('does not hang when a dependency accepts the command but never answers', async () => {
+      // This is the failure mode that actually occurred in the container stack:
+      // after the API container's network was replaced, ioredis still reported
+      // `status: 'ready'` while its socket was dead, and `PING` was queued
+      // forever because the client sets `enableOfflineQueue: true` and
+      // `maxRetriesPerRequest: null`. A probe that never settles turns /ready
+      // into a hang, and nginx answers 504 instead of the 503 that tells an
+      // orchestrator to take the instance out of rotation.
+      setRedisClient({
+        status: 'ready',
+        ping: () => new Promise<string>(() => undefined),
+      } as unknown as Redis);
+
+      const startedAt = Date.now();
+      const response = await request(getApp()).get('/ready');
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(response.status).toBe(503);
+      expect(response.body.status).toBe('not_ready');
+      expect(response.body.checks.redis.ok).toBe(false);
+      expect(response.body.checks.redis.error).toBe('timeout');
+      // MongoDB is fine, so only the hung dependency may be reported bad.
+      expect(response.body.checks.mongo.ok).toBe(true);
+      // Must fail fast. Without the bounded probe this request never returns
+      // and the suite only ends when vitest kills it.
+      expect(elapsedMs).toBeLessThan(15_000);
+    });
+
     it('reports a timestamp on every response', async () => {
       const response = await request(getApp()).get('/ready');
 

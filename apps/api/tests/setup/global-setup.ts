@@ -6,9 +6,9 @@ import { MongoMemoryReplSet } from 'mongodb-memory-server';
  * and asset assignment history (P2/P3).
  *
  * `mongodb-memory-server` downloads and runs a REAL mongod 7.x binary, so the
- * test suite exercises genuine transactions instead of a mock. Docker is not
- * available on this machine, which is why this approach is used instead of
- * docker-compose.
+ * test suite exercises genuine transactions instead of a mock. It needs no
+ * container runtime, which keeps `npm test` runnable anywhere. The compose
+ * stack is exercised separately by `npm run test:docker` (see D-04).
  */
 let replSet: MongoMemoryReplSet | undefined;
 

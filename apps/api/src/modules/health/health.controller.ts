@@ -5,14 +5,57 @@ import { isProduction } from '../../config/env';
 
 type Check = { ok: boolean; error?: string };
 
+/**
+ * A readiness probe must fail fast.
+ *
+ * AGENTS.md §11 requires `/ready` to verify MongoDB and Redis. Both drivers can
+ * otherwise block indefinitely on a half-open socket, which turns this endpoint
+ * into a hang instead of a verdict — an orchestrator or nginx then sees only a
+ * gateway timeout:
+ *
+ * - mongoose leaves `socketTimeoutMS` unset (0 = no timeout) and
+ *   `serverSelectionTimeoutMS` governs *initial* server selection only, so a
+ *   `ping` issued over a connection the peer has dropped never returns.
+ * - ioredis is created with `enableOfflineQueue: true` and
+ *   `maxRetriesPerRequest: null`, so a command on a dead connection is queued
+ *   rather than rejected.
+ *
+ * The `readyState` pre-check catches the common case quickly but is not
+ * sufficient alone: a driver only notices a dropped socket the next time it is
+ * used, and reports itself connected until then.
+ */
+const PROBE_TIMEOUT_MS = 3_000;
+
+/**
+ * Rejection sentinel rather than a custom Error subclass: `instanceof` is
+ * unreliable when the TypeScript target downlevels `class extends Error`.
+ */
+const PROBE_TIMEOUT = Symbol('probe-timeout');
+
+const withTimeout = async (probe: () => Promise<boolean>): Promise<boolean> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expiry = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(PROBE_TIMEOUT), PROBE_TIMEOUT_MS);
+    // Never hold the event loop open on account of a probe timer.
+    timer.unref?.();
+  });
+
+  try {
+    return await Promise.race([probe(), expiry]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
 const describe = async (
   probe: () => Promise<boolean>,
   readyState?: () => number,
 ): Promise<Check> => {
   try {
     if (readyState && readyState() !== 1) return { ok: false, error: 'not connected' };
-    return { ok: await probe() };
+    return { ok: await withTimeout(probe) };
   } catch (error) {
+    if (error === PROBE_TIMEOUT) return { ok: false, error: 'timeout' };
     return {
       ok: false,
       // Never leak internal details in production.

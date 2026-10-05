@@ -40,8 +40,10 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends curl \
  && rm -rf /var/lib/apt/lists/*
 
+# `npm ci --workspace=@harvik/api` hoists every dependency to the workspace
+# root, so there is no apps/api/node_modules to copy. Node resolves modules by
+# walking up from apps/api/dist/, which finds /repo/node_modules.
 COPY --from=build /repo/node_modules ./node_modules
-COPY --from=build /repo/apps/api/node_modules ./apps/api/node_modules
 COPY --from=build /repo/apps/api/dist ./apps/api/dist
 COPY --from=build /repo/apps/api/package.json ./apps/api/package.json
 COPY deploy/ecosystem.config.js ./deploy/ecosystem.config.js

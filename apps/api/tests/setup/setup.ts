@@ -3,29 +3,37 @@ import type { Redis } from 'ioredis';
 import RedisMock from 'ioredis-mock';
 
 // MUST be first: sets process.env before `src/config/env.ts` is imported.
-import './env-vars';
+import { DOCKER_TESTS } from './env-vars';
 
 import { connectMongo, disconnectMongo } from '../../src/db/mongo';
-import { setRedisClient } from '../../src/db/redis';
+import { getRedis, setRedisClient } from '../../src/db/redis';
 
 /**
  * Redis test seam.
  *
- * No Redis server can run on this machine (no Windows build, no Docker, no
- * WSL), so the shared client is an in-memory double. It supports every command
+ * By default the suite runs without a Redis server (Redis publishes no Windows
+ * build), so the shared client is an in-memory double. It supports every command
  * the application issues (GET/SET/EX/DEL/EXISTS/INCR/TTL/SCAN/FLUSHALL), so
  * refresh-token denylisting and cache behaviour are genuinely exercised.
  *
- * BullMQ and `rate-limit-redis` need a real server (Lua evaluation) and are
- * therefore not exercised by the automated suite — see docs/DECISIONS.md.
+ * `rate-limit-redis` and BullMQ do need a real server (Lua evaluation), so
+ * `npm run test:docker` re-runs the same suites with HR_DOCKER_TESTS=1 against
+ * the compose stack, where no mock is injected and the production RedisStore is
+ * used. See docs/DECISIONS.md D-16.
  */
-const redisMock = new RedisMock();
-setRedisClient(redisMock as unknown as Redis);
+const redisMock: RedisMock | null = DOCKER_TESTS ? null : new RedisMock();
+if (redisMock) setRedisClient(redisMock as unknown as Redis);
 
-export const getRedisMock = (): RedisMock => redisMock;
+/**
+ * The client suites should inject. The mock normally; in docker mode the real
+ * container client, which `getRedis()` builds lazily from `REDIS_URL`.
+ */
+export const getRedisMock = (): RedisMock =>
+  (DOCKER_TESTS ? getRedis() : redisMock) as unknown as RedisMock;
 
 export const flushRedis = async (): Promise<void> => {
-  await redisMock.flushall();
+  if (redisMock) await redisMock.flushall();
+  else await getRedis().flushall();
 };
 
 /**

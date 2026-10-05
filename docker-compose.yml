@@ -136,6 +136,29 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+    # The worker image inherits the API image's HTTP healthcheck, but the worker
+    # serves no HTTP endpoint, so that probe could never succeed and the
+    # container would be marked unhealthy while working correctly.
+    #
+    # Redis reachability is the worker's only external dependency, so that is
+    # what is probed. Deliberately NOT probed: bull:harvik-maintenance:repeat*
+    # keys. Those are registered once at boot, so a Redis FLUSHALL (which
+    # `npm run test:docker` performs) removes them permanently while the worker
+    # keeps running fine. Docker does not restart a container that is merely
+    # *unhealthy*, so coupling the probe to those keys wedges the worker until
+    # someone restarts it manually. A failed registration is already covered:
+    # bootstrap() awaits the add and the catch calls process.exit(1), which
+    # `restart: unless-stopped` does act on.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "const R=require('ioredis');const r=new R(process.env.REDIS_URL,{lazyConnect:true,connectTimeout:3000});r.ping().then((p)=>{r.disconnect();process.exit(p==='PONG'?0:1)}).catch(()=>process.exit(1));"
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
     restart: unless-stopped
 
   # -------------------------------------------------------------------------
