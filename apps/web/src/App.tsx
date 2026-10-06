@@ -18,6 +18,8 @@ import { LicenseDetailPage } from './features/licenses/LicenseDetailPage';
 import { LicenseEditPage } from './features/licenses/LicenseEditPage';
 import { LicenseForm } from './features/licenses/LicenseForm';
 import { LicenseListPage } from './features/licenses/LicenseListPage';
+import { ExitListPage } from './features/exit/ExitListPage';
+import { ExitDetailPage } from './features/exit/ExitDetailPage';
 
 /**
  * AGENTS.md §9 — P1 routes.
@@ -139,14 +141,16 @@ export function App() {
                 </RequirePermission>
               }
             />
-            <Route
-              path="licenses/:id/edit"
+            <Route path="licenses/:id/edit"
               element={
                 <RequirePermission permission="manageLicenses">
                   <LicenseEditPage />
                 </RequirePermission>
               }
             />
+            {/* P3 — Exit / Offboarding (AGENTS.md §8.10, §9) */}
+            <Route path="exit" element={<ExitListPage />} />
+            <Route path="exit/:employeeId" element={<ExitDetailPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

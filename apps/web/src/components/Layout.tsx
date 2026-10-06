@@ -19,6 +19,7 @@ const NAV: NavItem[] = [
   { to: '/employees', label: 'Employees', permission: 'viewEmployeeDirectory' },
   { to: '/assets', label: 'Assets' },
   { to: '/licenses', label: 'Licenses' },
+  { to: '/exit', label: 'Exit / Offboarding' },
   { to: '/me', label: 'My Profile' },
 ];
 

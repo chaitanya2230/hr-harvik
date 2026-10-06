@@ -162,6 +162,36 @@ export function onAssetReturned(listener: AssetReturnedListener): () => void {
   };
 }
 
+export interface AssetAssignedEvent {
+  assetId: string;
+  assetCode: string;
+  assetName: string;
+  employeeId: string;
+  assignmentId: string;
+  actorId: string;
+}
+
+type AssetAssignedListener = (event: AssetAssignedEvent) => Promise<void> | void;
+const assetAssignedListeners: AssetAssignedListener[] = [];
+
+export function onAssetAssigned(listener: AssetAssignedListener): () => void {
+  assetAssignedListeners.push(listener);
+  return () => {
+    const index = assetAssignedListeners.indexOf(listener);
+    if (index >= 0) assetAssignedListeners.splice(index, 1);
+  };
+}
+
+async function emitAssetAssigned(event: AssetAssignedEvent): Promise<void> {
+  for (const listener of assetAssignedListeners) {
+    try {
+      await listener(event);
+    } catch {
+      // Non-fatal
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------
@@ -528,7 +558,7 @@ export async function assignAsset(
         if (!createdId) throw unprocessable('Assignment could not be completed');
         asset.currentAssignmentId = createdId;
         await asset.save({ session });
-        return { assignmentId: createdId };
+        return { assignmentId: createdId, assetCode: asset.assetCode, assetName: asset.name };
       } catch (error) {
         if (isDuplicateKey(error)) {
           throw conflict(`Asset is already assigned (concurrent assignment detected)`);
@@ -538,19 +568,28 @@ export async function assignAsset(
     });
     if (!outcome) throw unprocessable('Assignment could not be completed');
     assignmentId = outcome.assignmentId;
+
+    await recordAudit({
+      ...ctx,
+      actorId: ctx.account.userId,
+      action: 'asset.assigned',
+      entityType: 'AssetAssignment',
+      entityId: assignmentId,
+      after: { assetId: id, employeeId: body.employeeId },
+    });
+    await invalidateDashboardCache();
+
+    await emitAssetAssigned({
+      assetId: id,
+      assetCode: outcome.assetCode,
+      assetName: outcome.assetName,
+      employeeId: body.employeeId,
+      assignmentId: assignmentId.toString(),
+      actorId: ctx.account.userId,
+    });
   } finally {
     await session.endSession();
   }
-
-  await recordAudit({
-    ...ctx,
-    actorId: ctx.account.userId,
-    action: 'asset.assigned',
-    entityType: 'AssetAssignment',
-    entityId: assignmentId,
-    after: { assetId: id, employeeId: body.employeeId },
-  });
-  await invalidateDashboardCache();
 
   const row = await AssetAssignment.findById(assignmentId)
     .populate(ASSIGNMENT_POPULATE)

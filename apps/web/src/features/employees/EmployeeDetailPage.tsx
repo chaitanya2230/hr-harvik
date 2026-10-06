@@ -9,6 +9,7 @@ import {
 } from './api';
 import { useAssetAssignments } from '../assets/api';
 import { useAccessItems, useLicenseAssignments } from '../licenses/api';
+import { useExitForEmployee } from '../exit/api';
 import { useAuth } from '../auth/auth-context';
 import { useToast } from '../../components/Toast';
 import { Card, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from '../../components/ui';
@@ -21,13 +22,14 @@ import { Card, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } f
  * never placeholder numbers.
  */
 
-type Tab = 'overview' | 'history' | 'assets' | 'software';
+type Tab = 'overview' | 'history' | 'assets' | 'software' | 'exit';
 
 const TAB_LABELS: Record<Tab, string> = {
   overview: 'Overview',
   history: 'Employment History',
   assets: 'Assets',
   software: 'Software & Access',
+  exit: 'Exit',
 };
 
 const FUTURE_TABS = [
@@ -63,6 +65,7 @@ export function EmployeeDetailPage() {
     { page: 1, limit: 100, employeeId: id ?? '' },
     tab === 'software',
   );
+  const exitQuery = useExitForEmployee(tab === 'exit' ? id : undefined);
   const statusMutation = useChangeEmployeeStatus(id ?? '');
   const deleteMutation = useDeleteEmployee();
 
@@ -141,7 +144,7 @@ export function EmployeeDetailPage() {
       </div>
 
       <div role="tablist" aria-label="Employee sections" className="mb-4 flex flex-wrap gap-1 border-b border-slate-200">
-        {(['overview', 'history', 'assets', 'software'] as const).map((value) => (
+        {(['overview', 'history', 'assets', 'software', 'exit'] as const).map((value) => (
           <button
             key={value}
             type="button"
@@ -155,6 +158,10 @@ export function EmployeeDetailPage() {
             }`}
           >
             {TAB_LABELS[value]}
+            {value === 'exit' &&
+              ['On Notice', 'Resigned', 'Relieved'].includes(employee.status) && (
+                <span className="ml-1 inline-flex h-2 w-2 rounded-full bg-orange-400" />
+              )}
           </button>
         ))}
         {FUTURE_TABS.map((future) => (
@@ -349,6 +356,75 @@ export function EmployeeDetailPage() {
             )}
           </Card>
         </div>
+      ) : null}
+
+      {tab === 'exit' ? (
+        exitQuery.isPending ? (
+          <LoadingState label="Loading exit details…" />
+        ) : exitQuery.isError ? (
+          <Card title="Exit / Offboarding">
+            {['On Notice', 'Resigned', 'Relieved'].includes(employee.status) ? (
+              <p className="text-sm text-slate-500">
+                Exit record is being created or could not be loaded. Refresh to try again.
+              </p>
+            ) : (
+              <EmptyState title="No exit process" hint="Employee is not currently on notice or resigned." />
+            )}
+          </Card>
+        ) : exitQuery.data ? (
+          <div className="space-y-4">
+            <Card title="Exit overview">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="inline-flex items-center rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-medium text-orange-800">
+                  {exitQuery.data.data.stage}
+                </span>
+                <Link
+                  to={`/exit/${employee.id}`}
+                  className="text-sm text-brand-600 hover:underline"
+                >
+                  Open full exit page →
+                </Link>
+              </div>
+              <dl className="grid grid-cols-2 gap-2 text-sm">
+                <div><dt className="text-slate-500">Last working day</dt><dd className="font-medium text-slate-900">{exitQuery.data.data.lastWorkingDay}</dd></div>
+                <div><dt className="text-slate-500">Reason</dt><dd className="text-slate-900">{exitQuery.data.data.reason}</dd></div>
+              </dl>
+            </Card>
+
+            {exitQuery.data.data.blockers.length > 0 && (
+              <Card title="Blockers">
+                <ul className="space-y-1">
+                  {exitQuery.data.data.blockers.map((b, i) => (
+                    <li key={i} className="text-sm text-red-700">• {b}</li>
+                  ))}
+                </ul>
+              </Card>
+            )}
+
+            <Card title="Checklist summary">
+              <ul className="divide-y divide-slate-100">
+                {exitQuery.data.data.checklist.map((item) => (
+                  <li key={item.id} className="flex items-center justify-between py-1.5 text-sm">
+                    <span className="text-slate-700">{item.title}</span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                        item.status === 'Completed'
+                          ? 'bg-green-100 text-green-700'
+                          : item.status === 'Waived'
+                            ? 'bg-slate-100 text-slate-500'
+                            : 'bg-orange-100 text-orange-700'
+                      }`}
+                    >
+                      {item.status}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          </div>
+        ) : (
+          <EmptyState title="No exit process" hint="Employee is not currently on notice or resigned." />
+        )
       ) : null}
 
       {confirmingDelete ? (

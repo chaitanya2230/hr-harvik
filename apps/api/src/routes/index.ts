@@ -6,6 +6,7 @@ import { dashboardRouter } from '../modules/dashboard/dashboard.routes';
 import { assetRouter } from '../modules/assets/asset.routes';
 import { licenseRouter } from '../modules/licenses/license.routes';
 import { accessRouter } from '../modules/access/access.routes';
+import { exitRouter } from '../modules/exit/exit.routes';
 
 /**
  * AGENTS.md §10 — every endpoint lives under the `/api/v1` prefix.
@@ -13,8 +14,8 @@ import { accessRouter } from '../modules/access/access.routes';
  * Modules are registered here as they are implemented, phase by phase:
  *   P0 auth
  *   P1 departments, employees, dashboard
- *   P2 assets, licenses, access                     <- registered
- *   P3 exit
+ *   P2 assets, licenses, access
+ *   P3 exit                                         <- registered
  *   P4 documents
  *   P5 attendance, leave
  *   P6 recruitment, onboarding
@@ -29,3 +30,4 @@ apiRouter.use('/dashboard', dashboardRouter);
 apiRouter.use('/assets', assetRouter);
 apiRouter.use('/licenses', licenseRouter);
 apiRouter.use('/access', accessRouter);
+apiRouter.use('/exit', exitRouter);

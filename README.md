@@ -3,12 +3,13 @@
 Internal HR system for [Harvik Technologies](https://harviktech.com/), built
 against [`AGENTS.md`](./AGENTS.md).
 
-> **Phase status: P0 (foundation) only.**
+> **Phase status: P0 → P3 complete.**
 > Shipped so far: repository structure, MongoDB 7 replica set, Redis 7 + BullMQ,
 > Express API, JWT auth with refresh rotation, RBAC, audit logging, field-level
-> encryption, seed data, and the automated test suite.
-> Not yet built: employees, Employee 360, dashboard, recruitment, onboarding,
-> attendance, leave, documents, assets, licences, exit, reports, notifications.
+> encryption, seed data, employees, Employee 360, dashboard, assets, licenses,
+> access items, exit/offboarding lifecycle, live checklists, clearances, guarded relieve,
+> and the automated test suite (296 tests passing).
+> Not yet built: recruitment, onboarding, attendance, leave, documents, reports, notifications.
 > Nothing in the UI displays invented data — there are no placeholder metrics.
 
 ---
@@ -176,8 +177,8 @@ The seed never prints the demo password and never logs it.
 ## 8. Verification
 
 ```bash
-npm test             # 272 tests / 18 files: unit + integration (mock Redis, real mongod 7)
-npm run test:docker  # the SAME 272 tests against the compose MongoDB + Redis 7
+npm test             # 296 tests / 19 files: unit + integration (mock Redis, real mongod 7)
+npm run test:docker  # the SAME 296 tests against the compose MongoDB + Redis 7
 npm run lint         # eslint, api + web
 npm run build        # tsc (api) + vite build (web)
 ```
@@ -189,11 +190,11 @@ deliverable (§16) and no specs exist at P1.
 
 | Check | Result |
 | --- | --- |
-| `npm test` — 272 unit + integration tests, 18 files | pass (176 P0 + 38 P1 + 58 P2) |
-| `npm run test:docker` — same 272 tests, real Redis 7 + `RedisStore` | pass |
+| `npm test` — 296 unit + integration tests, 19 files | pass (176 P0 + 38 P1 + 58 P2 + 24 P3) |
+| `npm run test:docker` — same 296 tests, real Redis 7 + `RedisStore` | pass |
 | `npm run lint` — api and web | pass |
-| `npm run typecheck` — api `tsconfig.json` and `tsconfig.test.json` | pass |
-| `npm run build` — api `tsc` and web `vite build` (114+ modules) | pass |
+| `npm run typecheck` — api and web `tsconfig.json` | pass |
+| `npm run build` — api `tsc` and web `vite build` (127+ modules) | pass |
 | `docker compose config` | pass — `mongo rs-init redis worker api nginx` |
 | `docker compose build` | pass |
 | `docker compose up -d --build` | pass — 6 services, all healthy |
@@ -380,7 +381,7 @@ consume the budget.
 | 7 | Documents (upload, versions, PDF templates) | `modules/documents` | P4 |
 | 8 | Hardware / assets | `modules/assets` | **P2 done** — CRUD, assign/return/repair/retire, history, overdue, 26 API tests |
 | 9 | Software / licences / access | `modules/licenses`, `modules/access` | **P2 done** — CRUD, atomic seats, revoke/renew/suspend/expire, utilization, audited reveal, 32 API tests |
-| 10 | Exit / offboarding | `modules/exit` | P3 |
+| 10 | Exit / offboarding | `modules/exit` | **P3 done** — lifecycle, checklist, clearances, guarded relieve, force-relieve, 24 API tests |
 | 11 | Reports (11 reports, CSV/XLSX) | `modules/reports` | P7 |
 | 12 | Notifications / reminders | `modules/notifications`, `jobs` | P7 |
 | 14 | Employee lifecycle across all modules | employees + connected modules | P1–P8 |
@@ -397,7 +398,7 @@ stubbed, so nothing can accidentally depend on non-existent behaviour.
 | **P0** | repo, Docker Compose, Mongo rs0, Redis, API, worker, web, nginx, config, logging, errors, health, auth, RBAC, audit, IDs, encryption, seed, tests | complete |
 | **P1** | departments, employees, Employee 360, status machine, dashboard | complete — backend, 38 API tests, frontend, verified |
 | **P2** | assets, licences, seats, access items, transactions | complete — backend, 58 API tests, frontend, verified below |
-| P3 | exit, checklist, clearances, relieve guard, force-relieve | not started |
+| **P3** | exit, checklist, clearances, relieve guard, force-relieve | complete — backend, 24 API tests, frontend, verified |
 | P4 | documents, secure serving, versions, PDF templates | not started |
 | P5 | attendance, corrections, leave, balances, nightly jobs | not started |
 | P6 | recruitment, candidates, onboarding | not started |

@@ -236,3 +236,74 @@ export interface AccessItemEntry {
   createdAt: string;
   updatedAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// Exit / Offboarding (P3 — AGENTS.md §8.10)
+// ---------------------------------------------------------------------------
+
+export type ExitStage =
+  | 'Resignation'
+  | 'Notice Period'
+  | 'Clearance'
+  | 'Asset Return'
+  | 'Software Revocation'
+  | 'Final Settlement'
+  | 'Documents'
+  | 'Relieved'
+  | 'Cancelled';
+
+export type ChecklistStatus = 'Pending' | 'Completed' | 'Waived';
+export type ChecklistCategory = 'asset' | 'license' | 'access' | 'clearance' | 'settlement' | 'document' | 'other';
+export type ClearanceStatus = 'Pending' | 'Approved' | 'Rejected';
+export type FinalSettlementStatus = 'Pending' | 'Processing' | 'Completed';
+
+export interface ExitChecklistItem {
+  id: string;
+  category: ChecklistCategory;
+  title: string;
+  status: ChecklistStatus;
+  referenceType?: 'Asset' | 'License' | 'AccessItem' | null;
+  referenceId?: string | null;
+  details?: string | null;
+  completedAt?: string | null;
+  completedBy?: string | null;
+  notes?: string | null;
+}
+
+export interface ClearanceItem {
+  status: ClearanceStatus;
+  comments?: string | null;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+}
+
+export interface ExitView {
+  id: string;
+  employeeId: string;
+  employeeCode: string;
+  employeeName: string;
+  designation?: string | null;
+  departmentId?: string | null;
+  departmentName?: string | null;
+  resignationDate: string;
+  noticePeriodDays: number;
+  lastWorkingDay: string;
+  reason: string;
+  reasonNote?: string | null;
+  clearances: {
+    manager: ClearanceItem;
+    hr: ClearanceItem;
+    finance: ClearanceItem;
+  };
+  checklist: ExitChecklistItem[];
+  finalSettlementStatus: FinalSettlementStatus;
+  experienceLetterDocId?: string | null;
+  relievingLetterDocId?: string | null;
+  stage: ExitStage;
+  completedAt?: string | null;
+  forceRelieved?: boolean;
+  forceReason?: string | null;
+  blockers: string[];
+  createdAt: string;
+  updatedAt: string;
+}

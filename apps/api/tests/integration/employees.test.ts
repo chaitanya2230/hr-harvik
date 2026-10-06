@@ -475,7 +475,7 @@ describe('employees (§8.2, §14)', () => {
       expect(audits).toBeGreaterThanOrEqual(2);
     });
 
-    it('creates NO exit record on On Notice / Resigned in P1 (P3 owns it)', async () => {
+    it('creates an Exit record when employee transitions to On Notice (P3 requirement §8.10)', async () => {
       const created = await request(app)
         .post('/api/v1/employees')
         .set(...authAs.admin())
@@ -488,9 +488,16 @@ describe('employees (§8.2, §14)', () => {
         .send({ status: 'On Notice' });
       expect(toNotice.status).toBe(200);
 
-      // There is no exits collection in P1 — assert via mongoose connection.
+      // P3 §8.10: transitioning to On Notice must auto-create the Exit record.
+      // Allow a brief async propagation window (the listener is non-blocking).
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
       const { default: mongoose } = await import('mongoose');
-      expect(mongoose.connection.collections['exits']).toBeUndefined();
+      const exits = mongoose.connection.collections['exits'];
+      expect(exits).toBeDefined();
+      const exitDoc = await exits?.findOne({ employeeId: new mongoose.Types.ObjectId(id) });
+      expect(exitDoc).not.toBeNull();
+      expect(['Notice Period', 'Clearance', 'Asset Return', 'Software Revocation', 'Final Settlement', 'Documents'].includes(exitDoc?.stage as string)).toBe(true);
     });
 
     it('rejects invalid transitions with 422 (§14)', async () => {

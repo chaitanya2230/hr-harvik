@@ -543,6 +543,28 @@ assignments + Active access items of On Notice/Resigned employees.
 
 ---
 
+## D-33 — Exit offboarding lifecycle, dynamic checklist, and blocker enforcement
+
+*Status: accepted · P3*
+
+AGENTS.md §7 + §8.10 mandate an automated offboarding process for employees transitioning to On Notice or Resigned.
+When an employee transitions status (or when an exit is explicitly initiated), an Exit record is created with a dynamic checklist aggregating all outstanding assets, software licenses, access items, clearances (Manager, HR, Finance), and settlement steps.
+Crucially:
+- Any asset returned via the Assets module or license revoked via the Licenses module automatically completes the corresponding checklist item via in-process event listeners (`onAssetReturned`, `onLicenseRevoked`, `onAccessRevoked`).
+- Any new asset assigned while on notice automatically appends a return task to the checklist (`onAssetAssigned`).
+- Relieve action is strictly guarded: blocked with 422 if any checklist item or clearance remains pending.
+- Force-relieve is strictly restricted to HR Admin with a mandatory audited `forceReason`.
+- Relieving executes an atomic multi-document transaction updating employee status to Relieved, disabling user login (`isActive: false`), locking `lastWorkingDay`, and closing employment history.
+- Resignation withdrawal (On Notice → Active) cancels the open exit record, preserves audit trail, and leaves assets/licenses unaffected.
+
+## D-34 — trustedFilter application for Exit queries under global sanitizeFilter
+
+*Status: accepted · P3*
+
+Under global Mongoose `sanitizeFilter: true`, MongoDB operator queries such as `{ $nin: ['Relieved', 'Cancelled'] }` and `{ $ne: 'Cancelled' }` require explicit trusted filtering to prevent Mongoose wrapping operators into `$eq`. Following D-27, all server-constructed operator fragments in `exit.service.ts` use `trustedFilter()` from `apps/api/src/utils/mongo.ts`. All exit routes are wrapped with `asyncHandler()` to ensure async errors and rejections properly propagate through Express error handling.
+
+---
+
 ## Known gaps carried into later phases
 
 | Gap | Why | Owner |
