@@ -72,13 +72,16 @@ describe('dashboard summary (§8.1)', () => {
     expect(metrics.fullTime).toBeGreaterThan(0);
     expect(scope.kind).toBe('organisation');
 
-    // Future-phase metrics are null, never fabricated zeros.
+    // Metrics without a data source yet are null, never fabricated zeros.
+    // P2 computes pendingAssetReturns/pendingLicenseRevocations (D-32).
     expect(metrics.onLeave).toBeNull();
     expect(metrics.pendingOnboarding).toBeNull();
     expect(metrics.pendingDocumentGeneration).toBeNull();
-    expect(metrics.pendingAssetReturns).toBeNull();
-    expect(metrics.pendingLicenseRevocations).toBeNull();
-    expect(unavailable.length).toBe(5);
+    expect(unavailable.length).toBe(3);
+
+    // P2 metrics are real numbers recomputed from the ledger below.
+    expect(typeof metrics.pendingAssetReturns).toBe('number');
+    expect(typeof metrics.pendingLicenseRevocations).toBe('number');
 
     expect(Array.isArray(recentlyJoined)).toBe(true);
     expect(quickActions.find((a: { key: string }) => a.key === 'addEmployee').enabled).toBe(true);
@@ -86,6 +89,7 @@ describe('dashboard summary (§8.1)', () => {
 
   it('values match the underlying data', async () => {
     const { Employee } = await import('../../src/modules/employees/employee.model');
+    const { AssetAssignment } = await import('../../src/modules/assets/asset.model');
     const { trustedFilter } = await import('../../src/utils/mongo');
     const total = await Employee.countDocuments({
       isDeleted: false,
@@ -97,6 +101,29 @@ describe('dashboard summary (§8.1)', () => {
       .set(...bearer(admin.accessToken));
 
     expect(response.body.data.metrics.totalEmployees).toBe(total);
+
+    // P2: pending returns recomputed from the ledger, not hard-coded.
+    const outstanding = await AssetAssignment.countDocuments({
+      isDeleted: false,
+      actualReturnDate: null,
+    }).exec();
+    expect(response.body.data.metrics.pendingAssetReturns).toBeLessThanOrEqual(outstanding);
+  });
+
+  it('links every card to a filtered list or null (§8.1 clickable cards)', async () => {
+    const response = await request(app)
+      .get('/api/v1/dashboard/summary')
+      .set(...bearer(admin.accessToken));
+
+    const links = response.body.data.links as Record<string, string | null>;
+    expect(links.totalEmployees).toBe('/employees');
+    expect(links.newJoiners).toMatch(/^\/employees\?joinedFrom=\d{4}-\d{2}-\d{2}$/);
+    expect(links.pendingAssetReturns).toBe('/assets/assignments?active=true');
+    expect(links.pendingLicenseRevocations).toBe('/licenses/assignments?status=Assigned');
+    // No list exists yet for these phases — null, never a dead link.
+    expect(links.onLeave).toBeNull();
+    expect(links.pendingOnboarding).toBeNull();
+    expect(links.pendingDocumentGeneration).toBeNull();
   });
 
   it('uses the 60s Redis cache and invalidates on employee writes', async () => {

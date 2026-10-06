@@ -2,6 +2,9 @@ import { Types } from 'mongoose';
 import type { FilterQuery } from 'mongoose';
 import { Employee } from '../employees/employee.model';
 import type { EmployeeDoc } from '../employees/employee.schema';
+import { AssetAssignment } from '../assets/asset.model';
+import { LicenseAssignment } from '../licenses/license.model';
+import { AccessItem } from '../access/access.model';
 import { scopeIdsFor } from '../employees/employee.service';
 import { cacheGetJson, cacheSetJson } from '../../utils/cache';
 import { trustedFilter } from '../../utils/mongo';
@@ -16,21 +19,17 @@ import type { AuthAccount } from '../auth/auth.service';
  * 60-second Redis cache). Nothing is hardcoded and no fixture value is ever
  * returned.
  *
- * ## Metrics that P1 cannot compute
+ * ## Metrics without a data source yet
  *
- * Five of the fourteen §8.1 metrics depend on collections that belong to later
- * phases and do not exist yet:
+ * Three §8.1 metrics depend on collections that belong to later phases and do
+ * not exist yet (`onLeave` → P5, `pendingOnboarding` → P6,
+ * `pendingDocumentGeneration` → P4). The two P2 metrics (`pendingAssetReturns`,
+ * `pendingLicenseRevocations`) are computed here since P2 owns those
+ * collections — see D-32 for their exact definitions.
  *
- *   - `onLeave`                    → the Leave collection      (P5)
- *   - `pendingOnboarding`          → the Onboarding collection(P6)
- *   - `pendingDocumentGeneration`  → the Documents collection (P4)
- *   - `pendingAssetReturns`        → the Assets collection    (P2)
- *   - `pendingLicenseRevocations`  → the Licences collection  (P2)
- *
- * These are returned as `null` with an entry in `unavailable`, never as `0`. A
- * zero would be a fabricated business claim — it would assert that nobody is on
- * leave, when in fact nobody has recorded any leave yet. See docs/DECISIONS.md
- * D-26.
+ * Uncomputable metrics are returned as `null` with an entry in `unavailable`,
+ * never as `0`. A zero would be a fabricated business claim. See
+ * docs/DECISIONS.md D-26.
  */
 
 export type ScopeKind = 'organisation' | 'team' | 'self';
@@ -88,6 +87,12 @@ export interface DashboardSummary {
     pendingAssetReturns: number | null;
     pendingLicenseRevocations: number | null;
   };
+  /**
+   * §8.1 — cards are clickable and lead to filtered lists. A null href means
+   * no list exists yet (the owning phase has not shipped it); the UI renders
+   * those cards without a link rather than a dead one.
+   */
+  links: Record<string, string | null>;
   unavailable: DashboardUnavailable[];
   recentlyJoined: EmployeeChip[];
   leavingSoonEmployees: EmployeeChip[];
@@ -130,17 +135,16 @@ const chip = (doc: {
 });
 
 /**
- * §8.1 quick actions. Only "Add Employee" is live in P1; the rest name the phase
- * that owns them so the UI can render them disabled instead of linking to
- * routes that do not exist yet.
+ * §8.1 quick actions. "Assign Asset" and "Assign Software License" go live in
+ * P2; the rest name the phase that owns them.
  */
 const QUICK_ACTIONS: QuickAction[] = [
   { key: 'addEmployee', label: 'Add Employee', href: '/employees/new', enabled: true },
   { key: 'addCandidate', label: 'Add Candidate', href: '/recruitment/candidates/new', enabled: false, phase: 'P6' },
   { key: 'startOnboarding', label: 'Start Onboarding', href: '/onboarding', enabled: false, phase: 'P6' },
   { key: 'generateDocument', label: 'Generate Document', href: '/documents', enabled: false, phase: 'P4' },
-  { key: 'assignAsset', label: 'Assign Asset', href: '/assets', enabled: false, phase: 'P2' },
-  { key: 'assignLicense', label: 'Assign Software License', href: '/licenses', enabled: false, phase: 'P2' },
+  { key: 'assignAsset', label: 'Assign Asset', href: '/assets', enabled: true },
+  { key: 'assignLicense', label: 'Assign Software License', href: '/licenses', enabled: true },
   { key: 'processExit', label: 'Process Exit', href: '/exit', enabled: false, phase: 'P3' },
 ];
 
@@ -148,8 +152,6 @@ const UNAVAILABLE: DashboardUnavailable[] = [
   { metric: 'onLeave', phase: 'P5', reason: 'Requires the Leave collection (approved leave today).' },
   { metric: 'pendingOnboarding', phase: 'P6', reason: 'Requires the Onboarding collection.' },
   { metric: 'pendingDocumentGeneration', phase: 'P4', reason: 'Requires the Documents collection.' },
-  { metric: 'pendingAssetReturns', phase: 'P2', reason: 'Requires the Assets collection.' },
-  { metric: 'pendingLicenseRevocations', phase: 'P2', reason: 'Requires the Licences collection.' },
 ];
 
 export async function buildDashboardSummary(account: AuthAccount): Promise<DashboardSummary> {
@@ -188,6 +190,44 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
   const count = (filter: FilterQuery<EmployeeDoc>): Promise<number> =>
     Employee.countDocuments(filter).exec();
 
+  // P2 metrics (D-32): employees whose exit is still open, scoped like
+  // everything else. Pending returns/revocations hang off this set.
+  const noticeIds = await Employee.distinct(
+    '_id',
+    base({ status: trustedFilter({ $in: ['On Notice', 'Resigned'] }) }),
+  ).exec();
+  const noticeIdFilter = trustedFilter({
+    $in: noticeIds.map((id) => new Types.ObjectId(String(id))),
+  });
+  const scopeEmployeeFilter =
+    visibleIds === undefined
+      ? {}
+      : { employeeId: trustedFilter({ $in: [...visibleIds].map((id) => new Types.ObjectId(id)) }) };
+
+  const pendingAssetReturns = await AssetAssignment.countDocuments({
+    isDeleted: false,
+    actualReturnDate: null,
+    ...scopeEmployeeFilter,
+    $or: [
+      { expectedReturnDate: trustedFilter({ $lt: today }) },
+      { employeeId: noticeIdFilter },
+    ],
+  }).exec();
+
+  const pendingLicenseRevocations =
+    (await LicenseAssignment.countDocuments({
+      isDeleted: false,
+      status: 'Assigned',
+      ...scopeEmployeeFilter,
+      employeeId: noticeIdFilter,
+    }).exec()) +
+    (await AccessItem.countDocuments({
+      isDeleted: false,
+      status: 'Active',
+      ...scopeEmployeeFilter,
+      employeeId: noticeIdFilter,
+    }).exec());
+
   const [
     totalEmployees,
     fullTime,
@@ -212,9 +252,9 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
         lastWorkingDay: trustedFilter({ $gte: today, $lte: leavingUntil }),
       }),
     ),
-    // P1's one real component of "pending HR actions": employees whose exit the
-    // HR team still has to process. The remaining components are listed but
-    // null, so `total` is explicitly a partial figure.
+    // §8.1 definition: pending HR actions is the sum of its components. Only the
+    // exit-awaiting, asset-return and license-revocation components are computable
+    // before P4/P5/P6/P7; the rest stay documented in `unavailable`.
     count(base({ status: trustedFilter({ $in: ['On Notice', 'Resigned'] }) })),
     Employee.find(counted())
       .sort({ dateOfJoining: -1, employeeCode: -1 })
@@ -255,13 +295,29 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
       pendingHrActions: {
         key: 'pendingHrActions',
         label: 'Pending HR actions',
-        value: awaitingExit,
+        value: awaitingExit + pendingAssetReturns + pendingLicenseRevocations,
         phase: null,
       },
       pendingOnboarding: null,
       pendingDocumentGeneration: null,
-      pendingAssetReturns: null,
-      pendingLicenseRevocations: null,
+      pendingAssetReturns,
+      pendingLicenseRevocations,
+    },
+    links: {
+      totalEmployees: '/employees',
+      fullTime: '/employees?employmentType=Full-Time',
+      interns: '/employees?employmentType=Intern',
+      freelancers: '/employees?employmentType=Freelancer',
+      newJoiners: `/employees?joinedFrom=${newJoinerFrom}`,
+      onLeave: null,
+      onNotice: '/employees?status=On Notice',
+      leavingSoon: '#leaving-soon',
+      recentlyJoined: '#recently-joined',
+      pendingHrActions: null,
+      pendingOnboarding: null,
+      pendingDocumentGeneration: null,
+      pendingAssetReturns: '/assets/assignments?active=true',
+      pendingLicenseRevocations: '/licenses/assignments?status=Assigned',
     },
     unavailable: UNAVAILABLE,
     recentlyJoined: recentlyJoinedDocs.map(chip),

@@ -10,6 +10,14 @@ import { EmployeeEditPage } from './features/employees/EmployeeEditPage';
 import { EmployeeForm } from './features/employees/EmployeeForm';
 import { EmployeeListPage } from './features/employees/EmployeeListPage';
 import { MyProfilePage } from './features/employees/MyProfilePage';
+import { AssetDetailPage } from './features/assets/AssetDetailPage';
+import { AssetEditPage } from './features/assets/AssetEditPage';
+import { AssetForm } from './features/assets/AssetForm';
+import { AssetListPage } from './features/assets/AssetListPage';
+import { LicenseDetailPage } from './features/licenses/LicenseDetailPage';
+import { LicenseEditPage } from './features/licenses/LicenseEditPage';
+import { LicenseForm } from './features/licenses/LicenseForm';
+import { LicenseListPage } from './features/licenses/LicenseListPage';
 
 /**
  * AGENTS.md §9 — P1 routes.
@@ -87,6 +95,58 @@ export function App() {
               }
             />
             <Route path="me" element={<MyProfilePage />} />
+            {/* List pages stay open: the inventory tabs gate themselves to HR
+                while the assignment ledgers are scoped per role server-side. */}
+            <Route path="assets" element={<AssetListPage />} />
+            <Route
+              path="assets/new"
+              element={
+                <RequirePermission permission="manageAssets">
+                  <AssetForm />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="assets/:id"
+              element={
+                <RequirePermission permission="manageAssets">
+                  <AssetDetailPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="assets/:id/edit"
+              element={
+                <RequirePermission permission="manageAssets">
+                  <AssetEditPage />
+                </RequirePermission>
+              }
+            />
+            <Route path="licenses" element={<LicenseListPage />} />
+            <Route
+              path="licenses/new"
+              element={
+                <RequirePermission permission="manageLicenses">
+                  <LicenseForm />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="licenses/:id"
+              element={
+                <RequirePermission permission="manageLicenses">
+                  <LicenseDetailPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="licenses/:id/edit"
+              element={
+                <RequirePermission permission="manageLicenses">
+                  <LicenseEditPage />
+                </RequirePermission>
+              }
+            />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

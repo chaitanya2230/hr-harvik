@@ -128,4 +128,111 @@ export interface DashboardSummary {
   }>;
   leavingSoonEmployees: DashboardSummary['recentlyJoined'];
   quickActions: Array<{ key: string; label: string; href: string; enabled: boolean; phase?: string }>;
+  /** §8.1 clickable cards. Null where no filtered list exists yet. */
+  links: Record<string, string | null>;
+}
+
+export type AssetStatus =
+  | 'Available'
+  | 'Assigned'
+  | 'Under Repair'
+  | 'Lost'
+  | 'Damaged'
+  | 'Returned'
+  | 'Retired';
+
+export interface AssetItem {
+  id: string;
+  assetCode: string;
+  name: string;
+  type: string;
+  brand: string | null;
+  model: string | null;
+  serialNumber: string;
+  purchaseDate: string | null;
+  purchaseCost: number | null;
+  condition: string | null;
+  status: AssetStatus;
+  currentAssignmentId: string | null;
+  notes: string | null;
+  activeAssignment: {
+    id: string;
+    employee: { id: string; employeeCode: string; fullName: string };
+    assignedAt: string;
+    expectedReturnDate: string | null;
+    overdue: boolean;
+  } | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssetAssignmentItem {
+  id: string;
+  asset: { id: string; assetCode: string; name: string; type: string } | null;
+  employee: { id: string; employeeCode: string; fullName: string } | null;
+  assignedAt: string;
+  expectedReturnDate: string | null;
+  actualReturnDate: string | null;
+  overdue: boolean;
+  conditionAtAssign: string | null;
+  conditionAtReturn: string | null;
+  notes: string | null;
+}
+
+export type LicenseStatus = 'Available' | 'Assigned' | 'Expired' | 'Suspended' | 'Revoked';
+
+export interface LicenseItem {
+  id: string;
+  licenseCode: string;
+  softwareName: string;
+  licenseType: string;
+  hasKey: boolean;
+  provider: string | null;
+  cost: number | null;
+  currency: string | null;
+  billingCycle: string | null;
+  startDate: string | null;
+  renewalDate: string | null;
+  maxSeats: number;
+  usedSeats: number;
+  availableSeats: number;
+  status: LicenseStatus;
+  effectivelyExpired: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LicenseAssignmentItem {
+  id: string;
+  license: { id: string; licenseCode: string; softwareName: string } | null;
+  employee: { id: string; employeeCode: string; fullName: string } | null;
+  assignedAt: string;
+  accountIdentifier: string | null;
+  status: 'Assigned' | 'Revoked';
+  revokedAt: string | null;
+  revocationNote: string | null;
+}
+
+export interface LicenseUtilization {
+  licenseCode: string;
+  softwareName: string;
+  status: LicenseStatus;
+  maxSeats: number;
+  usedSeats: number;
+  availableSeats: number;
+  utilizationPct: number;
+  renewalDate: string | null;
+  activeAssignments: number;
+}
+
+export interface AccessItemEntry {
+  id: string;
+  employee: { id: string; employeeCode: string; fullName: string } | null;
+  system: string;
+  identifier: string | null;
+  status: 'Active' | 'Revoked';
+  revokedAt: string | null;
+  linkedLicenseAssignmentId: string | null;
+  createdAt: string;
+  updatedAt: string;
 }

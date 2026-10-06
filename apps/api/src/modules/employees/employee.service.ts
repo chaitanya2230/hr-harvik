@@ -162,6 +162,25 @@ async function assertDepartmentExists(departmentId: string | null | undefined): 
   if (!exists) throw unprocessable('The selected department does not exist');
 }
 
+/**
+ * Shared by the P2 asset / license / access services: the receiving employee
+ * must exist, must not be soft-deleted, and must not be Relieved (§8.8, §8.9).
+ */
+export async function assertEmployeeAssignable(
+  employeeId: Types.ObjectId,
+  resource: string,
+): Promise<void> {
+  const target = await Employee.findOne({ _id: employeeId, isDeleted: false })
+    .select('status')
+    .lean()
+    .exec();
+
+  if (!target) throw unprocessable(`The selected employee does not exist for this ${resource}`);
+  if (target.status === 'Relieved') {
+    throw unprocessable(`A Relieved employee cannot receive a ${resource}`);
+  }
+}
+
 /** §8.2 — duplicate email is a 409, not a 400. */
 async function assertEmailAvailable(email: string, excludeId?: Types.ObjectId): Promise<void> {
   const filter: FilterQuery<EmployeeDoc> = { email: email.toLowerCase() };

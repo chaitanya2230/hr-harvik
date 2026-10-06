@@ -121,6 +121,10 @@ Load the demo data, then open **http://localhost:8080**:
 docker compose run --rm seed
 ```
 
+> The `seed` service uses the `tools` profile, so `up --build` does not rebuild
+> it — after pulling new code run `docker compose build seed` first, otherwise
+> `run` silently uses the previous image.
+
 Stop and discard data:
 
 ```bash
@@ -172,8 +176,8 @@ The seed never prints the demo password and never logs it.
 ## 8. Verification
 
 ```bash
-npm test             # 214 tests / 15 files: unit + integration (mock Redis, real mongod 7)
-npm run test:docker  # the SAME 214 tests against the compose MongoDB + Redis 7
+npm test             # 272 tests / 18 files: unit + integration (mock Redis, real mongod 7)
+npm run test:docker  # the SAME 272 tests against the compose MongoDB + Redis 7
 npm run lint         # eslint, api + web
 npm run build        # tsc (api) + vite build (web)
 ```
@@ -185,11 +189,11 @@ deliverable (§16) and no specs exist at P1.
 
 | Check | Result |
 | --- | --- |
-| `npm test` — 214 unit + integration tests, 15 files | pass (176 P0 + 38 P1) |
-| `npm run test:docker` — same 214 tests, real Redis 7 + `RedisStore` | pass |
+| `npm test` — 272 unit + integration tests, 18 files | pass (176 P0 + 38 P1 + 58 P2) |
+| `npm run test:docker` — same 272 tests, real Redis 7 + `RedisStore` | pass |
 | `npm run lint` — api and web | pass |
 | `npm run typecheck` — api `tsconfig.json` and `tsconfig.test.json` | pass |
-| `npm run build` — api `tsc` and web `vite build` (114 modules, 432 kB JS) | pass |
+| `npm run build` — api `tsc` and web `vite build` (114+ modules) | pass |
 | `docker compose config` | pass — `mongo rs-init redis worker api nginx` |
 | `docker compose build` | pass |
 | `docker compose up -d --build` | pass — 6 services, all healthy |
@@ -213,7 +217,7 @@ deliverable (§16) and no specs exist at P1.
 | Header hardening through nginx | pass — no `X-Powered-By`, Helmet CSP, `X-Request-Id` |
 | `/uploads/…` never publicly served (§13) | pass — direct guess 404, traversal 400 |
 | All four demo roles log in through nginx | pass |
-| `docker compose run --rm seed`, run twice | pass — 5 departments / 11 employees / 4 users, idempotent |
+| `docker compose run --rm seed`, run twice | pass — 5 departments / 11 employees / 4 users + 30 assets / 8 licenses / 4 access items, idempotent |
 | P1 employees through nginx | pass — create → HRV-####, 409 duplicate email, search/filter, 360 tabs, history, status machine, re-hire, audit |
 | P1 dashboard through nginx | pass — 14 metric keys, values match MongoDB, 60s cache + invalidation on write, team/personal scoping |
 | 403 over HTTP | **reachable since P1** — employee routes enforce `requirePermission`; Manager/Employee denials and out-of-scope reads covered |
@@ -280,6 +284,35 @@ Base prefix `/api/v1`.
 | `GET` | `/api/v1/departments` | bearer | scoped department list for pickers |
 | `GET` | `/api/v1/departments/manager-options` | bearer | assignable managers (HR roles) |
 | `GET` | `/api/v1/dashboard/summary` | bearer + scope | 14 metrics, 60s Redis cache |
+| `GET` | `/api/v1/assets` | bearer + `manageAssets` | inventory, search/filter/sort/overdue |
+| `POST` | `/api/v1/assets` | bearer + `manageAssets` | create, `AST-####` |
+| `GET` | `/api/v1/assets/:id` | bearer + `manageAssets` | 360-style detail + active assignment |
+| `GET` | `/api/v1/assets/:id/history` | bearer + `manageAssets` | assignment history |
+| `PATCH` | `/api/v1/assets/:id` | bearer + `manageAssets` | edit descriptive fields |
+| `DELETE` | `/api/v1/assets/:id` | bearer + `manageAssets` | 409 with history, else soft delete |
+| `POST` | `/api/v1/assets/:id/assign` | bearer + `manageAssets` | transactional assign |
+| `POST` | `/api/v1/assets/:id/return` | bearer + `manageAssets` | close assignment → Returned |
+| `POST` | `/api/v1/assets/:id/repair` | bearer + `manageAssets` | Available/Under Repair/Lost/Damaged |
+| `POST` | `/api/v1/assets/:id/retire` | bearer + `manageAssets` | terminal retire |
+| `GET` | `/api/v1/assets/assignments` | bearer + scope | scoped ledger, overdue filter |
+| `GET` | `/api/v1/licenses` | bearer + `manageLicenses` | pool, seats math, no keys |
+| `POST` | `/api/v1/licenses` | bearer + `manageLicenses` | create, `LIC-####`, key encrypted |
+| `GET` | `/api/v1/licenses/:id` | bearer + `manageLicenses` | detail, never the key |
+| `GET` | `/api/v1/licenses/:id/utilization` | bearer + `manageLicenses` | seat math |
+| `GET` | `/api/v1/licenses/:id/key` | HR Admin only | audited key reveal |
+| `PATCH` | `/api/v1/licenses/:id` | bearer + `manageLicenses` | edit, seat floor guard |
+| `DELETE` | `/api/v1/licenses/:id` | bearer + `manageLicenses` | 409 with history, else soft delete |
+| `POST` | `/api/v1/licenses/:id/assign` | bearer + `manageLicenses` | atomic seat claim |
+| `POST` | `/api/v1/licenses/assignments/:id/revoke` | bearer + `manageLicenses` | release seat |
+| `POST` | `/api/v1/licenses/:id/renew` | bearer + `manageLicenses` | new date, recalculates status |
+| `POST` | `/api/v1/licenses/:id/suspend` | bearer + `manageLicenses` | explicit boolean |
+| `POST` | `/api/v1/licenses/:id/expire` | bearer + `manageLicenses` | mark expired |
+| `POST` | `/api/v1/licenses/:id/revoke` | bearer + `manageLicenses` | revoke the license itself |
+| `GET` | `/api/v1/licenses/assignments` | bearer + scope | scoped seat ledger |
+| `POST` | `/api/v1/access` | bearer + `manageLicenses` | external account record |
+| `GET` | `/api/v1/access` | bearer + scope | scoped access ledger |
+| `GET` | `/api/v1/access/:id` | bearer + scope | scoped single read |
+| `POST` | `/api/v1/access/:id/revoke` | bearer + `manageLicenses` | mark revoked |
 
 Responses:
 
@@ -345,8 +378,8 @@ consume the budget.
 | 5 | Attendance | `modules/attendance` | P5 |
 | 6 | Leave | `modules/leave` | P5 |
 | 7 | Documents (upload, versions, PDF templates) | `modules/documents` | P4 |
-| 8 | Hardware / assets | `modules/assets` | P2 |
-| 9 | Software / licences / access | `modules/licenses` | P2 |
+| 8 | Hardware / assets | `modules/assets` | **P2 done** — CRUD, assign/return/repair/retire, history, overdue, 26 API tests |
+| 9 | Software / licences / access | `modules/licenses`, `modules/access` | **P2 done** — CRUD, atomic seats, revoke/renew/suspend/expire, utilization, audited reveal, 32 API tests |
 | 10 | Exit / offboarding | `modules/exit` | P3 |
 | 11 | Reports (11 reports, CSV/XLSX) | `modules/reports` | P7 |
 | 12 | Notifications / reminders | `modules/notifications`, `jobs` | P7 |
@@ -362,8 +395,8 @@ stubbed, so nothing can accidentally depend on non-existent behaviour.
 | Phase | Scope | Status |
 | --- | --- | --- |
 | **P0** | repo, Docker Compose, Mongo rs0, Redis, API, worker, web, nginx, config, logging, errors, health, auth, RBAC, audit, IDs, encryption, seed, tests | complete |
-| **P1** | departments, employees, Employee 360, status machine, dashboard | complete — backend, 38 API tests, frontend, verified below |
-| P2 | assets, licences, seats, access items, transactions | not started |
+| **P1** | departments, employees, Employee 360, status machine, dashboard | complete — backend, 38 API tests, frontend, verified |
+| **P2** | assets, licences, seats, access items, transactions | complete — backend, 58 API tests, frontend, verified below |
 | P3 | exit, checklist, clearances, relieve guard, force-relieve | not started |
 | P4 | documents, secure serving, versions, PDF templates | not started |
 | P5 | attendance, corrections, leave, balances, nightly jobs | not started |

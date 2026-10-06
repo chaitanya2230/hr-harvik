@@ -15,6 +15,11 @@ import { trusted } from 'mongoose';
  *
  * Rule: wrap the operator-bearing value, never a whole filter that contains
  * user-supplied objects.
+ *
+ * P2 addendum: `trusted()` only skips the `$eq`-wrapping — top-level operators
+ * Mongoose bans outright (`$expr`, `$where`) still throw. The license seat
+ * claim therefore uses optimistic concurrency (re-read, then `$inc` guarded by
+ * `usedSeats` equality) instead of an `$expr`-guarded update.
  */
 export function trustedFilter<T>(fragment: T): T {
   return trusted(fragment);

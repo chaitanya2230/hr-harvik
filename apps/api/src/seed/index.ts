@@ -6,15 +6,30 @@ import { Department } from '../modules/departments/department.model';
 import { Employee } from '../modules/employees/employee.model';
 import { User } from '../modules/users/user.model';
 import { AuditLog } from '../modules/audit/audit.model';
+import { Asset, AssetAssignment } from '../modules/assets/asset.model';
+import { License, LicenseAssignment } from '../modules/licenses/license.model';
+import { AccessItem } from '../modules/access/access.model';
 import { hashPassword } from '../modules/auth/auth.service';
+import { encryptField } from '../utils/crypto';
 import { nextHumanId } from '../utils/ids';
 import { DEMO_PASSWORD } from '../modules/auth/auth.schema';
-import { DEPARTMENTS, DEMO_USERS, EMPLOYEES, type SeedEmployee } from './data';
+import {
+  ACCESS_ITEMS,
+  ASSETS,
+  DEPARTMENTS,
+  DEMO_USERS,
+  EMPLOYEES,
+  LICENSES,
+  type SeedEmployee,
+} from './data';
 
 export interface SeedResult {
   departments: number;
   employees: number;
   users: number;
+  assets: number;
+  licenses: number;
+  accessItems: number;
 }
 
 /**
@@ -47,6 +62,11 @@ const clearCollections = async (): Promise<void> => {
     User.deleteMany({}),
     Employee.deleteMany({}),
     Department.deleteMany({}),
+    AssetAssignment.deleteMany({}),
+    Asset.deleteMany({}),
+    LicenseAssignment.deleteMany({}),
+    License.deleteMany({}),
+    AccessItem.deleteMany({}),
     // Reset the counters so codes restart at 0001 and stay deterministic.
     Counter.deleteMany({}),
   ]);
@@ -164,6 +184,150 @@ export async function runSeed({ reset = true }: { reset?: boolean } = {}): Promi
     departments: departmentDocs.length,
     employees: ordered.length,
     users: DEMO_USERS.length,
+    ...(await seedP2Fixtures(employeeIdByKey)),
+  };
+}
+
+/** P2 fixtures: assets, licenses (+ assignments), access items (§12, D-12). */
+async function seedP2Fixtures(
+  employeeIdByKey: Map<string, Types.ObjectId>,
+): Promise<Pick<SeedResult, 'assets' | 'licenses' | 'accessItems'>> {
+  const dateOnlyDaysFromToday = (days: number): string =>
+    new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
+  // --- Assets (§12: ~30) ---
+  const assetIdBySerial = new Map<string, Types.ObjectId>();
+
+  for (const seedAsset of ASSETS) {
+    const assetCode = await nextHumanId('asset');
+    const assigneeId = seedAsset.assigneeKey
+      ? (employeeIdByKey.get(seedAsset.assigneeKey) ?? null)
+      : null;
+    if (seedAsset.assigneeKey && !assigneeId) {
+      throw new Error(`Seed asset "${seedAsset.serial}" references unknown employee`);
+    }
+
+    const created = await Asset.create({
+      assetCode,
+      name: seedAsset.name,
+      type: seedAsset.type,
+      brand: seedAsset.brand ?? null,
+      model: seedAsset.model ?? null,
+      serialNumber: seedAsset.serial,
+      purchaseDate: seedAsset.purchaseDate,
+      purchaseCost: seedAsset.purchaseCost,
+      condition: seedAsset.condition ?? null,
+      status: seedAsset.status ?? (assigneeId ? 'Assigned' : 'Available'),
+      currentAssignmentId: null,
+      notes: null,
+      createdBy: null,
+      isDeleted: false,
+    });
+    assetIdBySerial.set(seedAsset.serial, created._id);
+
+    if (assigneeId) {
+      const assignment = await AssetAssignment.create({
+        assetId: created._id,
+        employeeId: assigneeId,
+        assignedAt: new Date('2026-01-10T00:00:00.000Z'),
+        expectedReturnDate: seedAsset.expectedReturnDate ?? null,
+        actualReturnDate: null,
+        conditionAtAssign: seedAsset.condition ?? null,
+        conditionAtReturn: null,
+        assignedBy: null,
+        returnedTo: null,
+        notes: null,
+        createdBy: null,
+        isDeleted: false,
+      });
+      await Asset.updateOne(
+        { _id: created._id },
+        { $set: { currentAssignmentId: assignment._id } },
+      ).exec();
+    }
+  }
+
+  // --- Licenses (§12: ~8, one expired, one near-renewal) ---
+  const licenseIdByName = new Map<string, Types.ObjectId>();
+  const licenseAssignmentIdByKey = new Map<string, Types.ObjectId>();
+
+  for (const seedLicense of LICENSES) {
+    const licenseCode = await nextHumanId('license');
+    const renewalDate =
+      seedLicense.renewal === 'expired'
+        ? dateOnlyDaysFromToday(-90)
+        : seedLicense.renewal === 'near'
+          ? dateOnlyDaysFromToday(20)
+          : seedLicense.renewal;
+
+    const created = await License.create({
+      licenseCode,
+      softwareName: seedLicense.softwareName,
+      licenseType: seedLicense.licenseType,
+      licenseKeyRef: seedLicense.licenseKey ? encryptField(seedLicense.licenseKey) : null,
+      provider: seedLicense.provider ?? null,
+      cost: seedLicense.cost ?? null,
+      currency: seedLicense.currency ?? null,
+      billingCycle: seedLicense.billingCycle ?? null,
+      startDate: seedLicense.startDate,
+      renewalDate,
+      maxSeats: seedLicense.maxSeats,
+      usedSeats: 0,
+      status: seedLicense.status ?? 'Available',
+      createdBy: null,
+      isDeleted: false,
+    });
+    licenseIdByName.set(seedLicense.softwareName, created._id);
+
+    for (const assigneeKey of seedLicense.assigneeKeys ?? []) {
+      const employeeId = employeeIdByKey.get(assigneeKey);
+      if (!employeeId) throw new Error(`Seed license references unknown employee`);
+      const assignment = await LicenseAssignment.create({
+        licenseId: created._id,
+        employeeId,
+        assignedAt: new Date('2026-01-10T00:00:00.000Z'),
+        accountIdentifier: null,
+        status: 'Assigned',
+        revokedAt: null,
+        revokedBy: null,
+        revocationNote: null,
+        createdBy: null,
+        isDeleted: false,
+      });
+      licenseAssignmentIdByKey.set(`${seedLicense.softwareName}:${assigneeKey}`, assignment._id);
+    }
+
+    const usedSeats = (seedLicense.assigneeKeys ?? []).length;
+    if (usedSeats > 0) {
+      await License.updateOne({ _id: created._id }, { $set: { usedSeats } }).exec();
+    }
+  }
+
+  // --- Access items (§7 examples) ---
+  for (const seedAccess of ACCESS_ITEMS) {
+    const employeeId = employeeIdByKey.get(seedAccess.employeeKey);
+    if (!employeeId) throw new Error(`Seed access item references unknown employee`);
+    const linkedId = seedAccess.linkedLicense
+      ? (licenseAssignmentIdByKey.get(`${seedAccess.linkedLicense}:${seedAccess.employeeKey}`) ?? null)
+      : null;
+
+    await AccessItem.create({
+      employeeId,
+      system: seedAccess.system,
+      identifier: seedAccess.identifier ?? null,
+      status: 'Active',
+      revokedAt: null,
+      revokedBy: null,
+      linkedLicenseAssignmentId: linkedId,
+      createdBy: null,
+      isDeleted: false,
+    });
+  }
+
+  return {
+    assets: ASSETS.length,
+    licenses: LICENSES.length,
+    accessItems: ACCESS_ITEMS.length,
   };
 }
 

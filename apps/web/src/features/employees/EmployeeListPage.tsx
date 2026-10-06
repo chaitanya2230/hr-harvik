@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useEmployeeList, type EmployeeListParams } from './api';
 import { useAuth } from '../auth/auth-context';
 import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from '../../components/ui';
@@ -27,12 +27,15 @@ export function EmployeeListPage() {
   const { account } = useAuth();
   const canCreate = account?.permissions.includes('createEmployee') ?? false;
 
+  // Dashboard cards link here with filters; honour them as initial state.
+  const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [q, setQ] = useState('');
   const [submittedQ, setSubmittedQ] = useState('');
   const [sort, setSort] = useState<string>('-dateOfJoining');
-  const [employmentType, setEmploymentType] = useState('');
-  const [status, setStatus] = useState('');
+  const [employmentType, setEmploymentType] = useState(searchParams.get('employmentType') ?? '');
+  const [status, setStatus] = useState(searchParams.get('status') ?? '');
+  const [joinedFrom] = useState(searchParams.get('joinedFrom') ?? '');
 
   const params: EmployeeListParams = {
     page,
@@ -41,6 +44,7 @@ export function EmployeeListPage() {
     ...(sort ? { sort } : {}),
     ...(employmentType ? { employmentType } : {}),
     ...(status ? { status } : {}),
+    ...(joinedFrom ? { joinedFrom } : {}),
   };
 
   const listQuery = useEmployeeList(params);

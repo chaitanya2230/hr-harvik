@@ -7,6 +7,8 @@ import {
   useEmployee,
   useEmployeeHistory,
 } from './api';
+import { useAssetAssignments } from '../assets/api';
+import { useAccessItems, useLicenseAssignments } from '../licenses/api';
 import { useAuth } from '../auth/auth-context';
 import { useToast } from '../../components/Toast';
 import { Card, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from '../../components/ui';
@@ -14,19 +16,24 @@ import { Card, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } f
 /**
  * AGENTS.md §8.2 — Employee 360 view.
  *
- * Only the P1 tabs carry real data (Overview, Employment History). The tabs
- * owned by later phases render an explicit "arrives in Pn" notice — never
- * placeholder numbers.
+ * Overview, Employment History, Assets and Software & Access carry real data.
+ * The tabs owned by later phases render an explicit "arrives in Pn" notice —
+ * never placeholder numbers.
  */
 
-type Tab = 'overview' | 'history';
+type Tab = 'overview' | 'history' | 'assets' | 'software';
+
+const TAB_LABELS: Record<Tab, string> = {
+  overview: 'Overview',
+  history: 'Employment History',
+  assets: 'Assets',
+  software: 'Software & Access',
+};
 
 const FUTURE_TABS = [
   { label: 'Documents', phase: 'P4' },
   { label: 'Attendance', phase: 'P5' },
   { label: 'Leave', phase: 'P5' },
-  { label: 'Assets', phase: 'P2' },
-  { label: 'Software & Access', phase: 'P2' },
 ] as const;
 
 const STATUS_OPTIONS = ['Active', 'Probation', 'On Notice', 'Resigned', 'Relieved', 'Inactive'] as const;
@@ -44,6 +51,18 @@ export function EmployeeDetailPage() {
 
   const detailQuery = useEmployee(id);
   const historyQuery = useEmployeeHistory(tab === 'history' ? id : undefined);
+  const employeeAssetsQuery = useAssetAssignments(
+    { page: 1, limit: 100, employeeId: id ?? '' },
+    tab === 'assets',
+  );
+  const employeeLicensesQuery = useLicenseAssignments(
+    { page: 1, limit: 100, employeeId: id ?? '' },
+    tab === 'software',
+  );
+  const employeeAccessQuery = useAccessItems(
+    { page: 1, limit: 100, employeeId: id ?? '' },
+    tab === 'software',
+  );
   const statusMutation = useChangeEmployeeStatus(id ?? '');
   const deleteMutation = useDeleteEmployee();
 
@@ -122,7 +141,7 @@ export function EmployeeDetailPage() {
       </div>
 
       <div role="tablist" aria-label="Employee sections" className="mb-4 flex flex-wrap gap-1 border-b border-slate-200">
-        {(['overview', 'history'] as const).map((value) => (
+        {(['overview', 'history', 'assets', 'software'] as const).map((value) => (
           <button
             key={value}
             type="button"
@@ -135,7 +154,7 @@ export function EmployeeDetailPage() {
                 : 'text-slate-500 hover:text-slate-900'
             }`}
           >
-            {value === 'overview' ? 'Overview' : 'Employment History'}
+            {TAB_LABELS[value]}
           </button>
         ))}
         {FUTURE_TABS.map((future) => (
@@ -220,11 +239,14 @@ export function EmployeeDetailPage() {
             </Card>
           ) : null}
         </div>
-      ) : historyQuery.isPending ? (
-        <LoadingState label="Loading history…" />
-      ) : historyQuery.isError ? (
-        <ErrorState error={historyQuery.error} onRetry={() => void historyQuery.refetch()} />
-      ) : historyQuery.data ? (
+      ) : null}
+
+      {tab === 'history' ? (
+        historyQuery.isPending ? (
+          <LoadingState label="Loading history…" />
+        ) : historyQuery.isError ? (
+          <ErrorState error={historyQuery.error} onRetry={() => void historyQuery.refetch()} />
+        ) : historyQuery.data ? (
         <div className="grid gap-4 md:grid-cols-2">
           <Card title="Status history">
             <ol className="space-y-3">
@@ -255,7 +277,79 @@ export function EmployeeDetailPage() {
         </div>
       ) : (
         <EmptyState title="No history available" />
-      )}
+      )
+      ) : null}
+
+      {tab === 'assets' ? (
+        <Card title="Assigned hardware">
+          {employeeAssetsQuery.isPending ? (
+            <LoadingState label="Loading assets…" />
+          ) : employeeAssetsQuery.isError ? (
+            <ErrorState error={employeeAssetsQuery.error} onRetry={() => void employeeAssetsQuery.refetch()} />
+          ) : (employeeAssetsQuery.data?.data.length ?? 0) === 0 ? (
+            <EmptyState title="No hardware assigned" />
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {employeeAssetsQuery.data?.data.map((row) => (
+                <li key={row.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                  <div>
+                    <p className="font-medium text-slate-900">
+                      {row.asset?.name ?? 'Unknown asset'}
+                      <span className="ml-2 font-mono text-xs text-slate-500">{row.asset?.assetCode}</span>
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Assigned {new Date(row.assignedAt).toLocaleDateString()}
+                      {row.actualReturnDate ? ` · returned ${row.actualReturnDate}` : ' · still held'}
+                      {row.overdue ? <span className="ml-1 font-medium text-red-600">overdue</span> : null}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      ) : null}
+
+      {tab === 'software' ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          <Card title="Software licenses">
+            {employeeLicensesQuery.isPending ? (
+              <LoadingState label="Loading licenses…" />
+            ) : employeeLicensesQuery.isError ? (
+              <ErrorState error={employeeLicensesQuery.error} onRetry={() => void employeeLicensesQuery.refetch()} />
+            ) : (employeeLicensesQuery.data?.data.length ?? 0) === 0 ? (
+              <EmptyState title="No licenses assigned" />
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {employeeLicensesQuery.data?.data.map((row) => (
+                  <li key={row.id} className="py-2 text-sm">
+                    <p className="font-medium text-slate-900">{row.license?.softwareName ?? '—'}</p>
+                    <p className="text-xs text-slate-500">{row.status}{row.accountIdentifier ? ` · ${row.accountIdentifier}` : ''}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+          <Card title="External access">
+            {employeeAccessQuery.isPending ? (
+              <LoadingState label="Loading access…" />
+            ) : employeeAccessQuery.isError ? (
+              <ErrorState error={employeeAccessQuery.error} onRetry={() => void employeeAccessQuery.refetch()} />
+            ) : (employeeAccessQuery.data?.data.length ?? 0) === 0 ? (
+              <EmptyState title="No external accounts" />
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {employeeAccessQuery.data?.data.map((row) => (
+                  <li key={row.id} className="py-2 text-sm">
+                    <p className="font-medium text-slate-900">{row.system}</p>
+                    <p className="text-xs text-slate-500">{row.status}{row.identifier ? ` · ${row.identifier}` : ''}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
+      ) : null}
 
       {confirmingDelete ? (
         <div role="alertdialog" aria-label="Confirm delete" className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4">

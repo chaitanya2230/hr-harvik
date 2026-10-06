@@ -471,6 +471,78 @@ operator-bearing value, never a filter containing user-supplied objects.
 
 ---
 
+## D-28 — Asset/license *types* are open strings; *statuses* are closed enums
+
+*Status: accepted · P2*
+
+AGENTS.md §1 requires new asset types and license types "without code changes",
+but §8.8/§8.9 specify no type-management endpoint and §6 reserves settings work
+for later. The only reading that satisfies both: `Asset.type`,
+`Asset.condition`, `License.licenseType` and `License.billingCycle` are
+validated non-empty strings (trimmed, length-capped), never enums. `Asset.status`
+and `License.status` stay closed enums because §7 fixes those lifecycles and
+§14 demands "invalid asset status rejected". The §14 "configurable asset types"
+case is therefore proven by creating an asset with a type outside the §7 list
+(e.g. `Tablet`) and getting 201. If a settings phase later adds an allow-list,
+these fields are the single place to consult it.
+
+## D-29 — `Returned` is a real resting state; repair walks it back to Available
+
+*Status: accepted · P2*
+
+§7 lists `Returned` as an asset status and the lifecycle reads
+Available → Assigned → Returned → Available, so `return` sets status `Returned`
+and closes the assignment (`actualReturnDate`) — it does not skip straight to
+`Available`. `Returned → Available` happens through the §8.8 repair operation,
+which also carries `Under Repair` / `Lost` / `Damaged` targets (the only
+candidate path to those §7 statuses, which assignment guards depend on).
+Assignment is accepted only from `Available`. `Retired` is terminal from any
+state. All of it is covered by the §14 AST cases.
+
+## D-30 — License `Assigned` means "no seats left"; expiry blocks without rewriting
+
+*Status: accepted · P2*
+
+§7 lists both `Available` and `Assigned` as license statuses without saying what
+moves between them. Rule: assigning the last free seat flips stored status to
+`Assigned`; a revoke that frees a seat flips it back to `Available`. Assignment
+is additionally blocked when *effectively* expired (`renewalDate < today`) even
+if stored status is still `Available` — the stored value is only rewritten by
+the explicit `expire`/`renew` operations ("renewal recalculates status").
+`renew` requires a future `renewalDate > startDate`. `suspend` takes an explicit
+`{ suspend: boolean }` body because §8.9 lists no separate unsuspend operation.
+
+## D-31 — No revoke cascade; access lives in its own module
+
+*Status: accepted · P2*
+
+Revoking a license assignment does **not** auto-revoke linked access items, and
+relieving an employee auto-revokes nothing: §2 rule 11 forbids automatic
+revocation in v1, and §8.10 gives the exit checklist (P3) ownership of that
+linkage. All P2 revoke endpoints are explicit manual HR actions. Access items
+live in `modules/access/` rather than inside `licenses/`: §18 maps
+"Software/Licences → licenses + access modules", and external accounts
+(GitHub, Slack, VPN) have a lifecycle independent of seat counts. P2 emits
+`asset.returned` / `license.revoked` / `access.revoked` in-process events (the
+D-25 pattern) so P3 can complete checklist items without P2 knowing exits exist.
+
+## D-32 — Dashboard cards become clickable in P2; pending sums stay honest
+
+*Status: accepted · P2*
+
+§8.1 "Cards must be clickable and lead to filtered lists" was left unmet by P1
+(plain divs). Since P2 already recomputes the two P2 metrics, it also adds a
+backend-supplied `href` per card (filter knowledge stays server-side) and the
+frontend renders links. Metrics with no list yet (P5/P7-owned) render without a
+link, never a dead one. `pendingHrActions` becomes the sum of its computable
+components per the §8.1 definition (exit-awaiting + asset returns + license
+revocations); the remaining components stay documented as pending. The two P2
+metric definitions: `pendingAssetReturns` = active assignments overdue or held by
+On Notice/Resigned employees; `pendingLicenseRevocations` = Assigned license
+assignments + Active access items of On Notice/Resigned employees.
+
+---
+
 ## Known gaps carried into later phases
 
 | Gap | Why | Owner |

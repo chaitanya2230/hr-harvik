@@ -26,6 +26,8 @@ export const PERMISSIONS = {
   approveTeamLeave: 'approveTeamLeave',
   approveAttendanceCorrection: 'approveAttendanceCorrection',
   provideManagerClearance: 'provideManagerClearance',
+  manageAssets: 'manageAssets',
+  manageLicenses: 'manageLicenses',
 } as const;
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
@@ -50,6 +52,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     PERMISSIONS.approveTeamLeave,
     PERMISSIONS.approveAttendanceCorrection,
     PERMISSIONS.provideManagerClearance,
+    // §6 names the employee-delete restriction only; asset/license management
+    // (including delete, which is soft or history-guarded) is an HR operation.
+    PERMISSIONS.manageAssets,
+    PERMISSIONS.manageLicenses,
   ],
   Manager: [
     PERMISSIONS.approveTeamLeave,
@@ -89,6 +95,33 @@ export const STATUS_TRANSITIONS: Record<EmployeeStatus, readonly EmployeeStatus[
   Inactive: ['Active'],
   Relieved: [],
 };
+
+/** AGENTS.md §7 — Asset lifecycle statuses (D-29). */
+export const ASSET_STATUSES = [
+  'Available',
+  'Assigned',
+  'Under Repair',
+  'Lost',
+  'Damaged',
+  'Returned',
+  'Retired',
+] as const;
+export type AssetStatus = (typeof ASSET_STATUSES)[number];
+
+/** AGENTS.md §7 — Asset assignment is open while it has no return date. */
+export const ASSIGNABLE_ASSET_STATUSES: readonly AssetStatus[] = ['Available'];
+
+/** AGENTS.md §7 — License lifecycle statuses (D-30). */
+export const LICENSE_STATUSES = ['Available', 'Assigned', 'Expired', 'Suspended', 'Revoked'] as const;
+export type LicenseStatus = (typeof LICENSE_STATUSES)[number];
+
+/** AGENTS.md §7 — License assignment statuses. */
+export const LICENSE_ASSIGNMENT_STATUSES = ['Assigned', 'Revoked'] as const;
+export type LicenseAssignmentStatus = (typeof LICENSE_ASSIGNMENT_STATUSES)[number];
+
+/** AGENTS.md §7 — Access item statuses. */
+export const ACCESS_STATUSES = ['Active', 'Revoked'] as const;
+export type AccessStatus = (typeof ACCESS_STATUSES)[number];
 
 /** AGENTS.md §7 — A human-readable ID prefix per entity. */
 export const ID_PREFIXES = {
