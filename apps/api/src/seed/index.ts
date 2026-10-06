@@ -11,6 +11,14 @@ import { License, LicenseAssignment } from '../modules/licenses/license.model';
 import { AccessItem } from '../modules/access/access.model';
 import { Document } from '../modules/documents/document.model';
 import { DocumentTemplate } from '../modules/documents/template.model';
+import { Holiday } from '../modules/attendance/holiday.model';
+import { Attendance } from '../modules/attendance/attendance.model';
+import { AttendanceCorrection } from '../modules/attendance/correction.model';
+import { LeaveType } from '../modules/leave/leave-type.model';
+import { LeaveBalance } from '../modules/leave/leave-balance.model';
+import { LeaveRequest } from '../modules/leave/leave-request.model';
+import { initializeEmployeeBalances } from '../modules/leave/leave-balance.service';
+import { isWeekend } from '../utils/dates';
 import { hashPassword } from '../modules/auth/auth.service';
 import { encryptField } from '../utils/crypto';
 import { nextHumanId } from '../utils/ids';
@@ -22,6 +30,8 @@ import {
   DEMO_USERS,
   DOCUMENT_TEMPLATES,
   EMPLOYEES,
+  HOLIDAYS,
+  LEAVE_TYPES,
   LICENSES,
   type SeedEmployee,
 } from './data';
@@ -72,6 +82,12 @@ const clearCollections = async (): Promise<void> => {
     AccessItem.deleteMany({}),
     Document.deleteMany({}),
     DocumentTemplate.deleteMany({}),
+    Holiday.deleteMany({}),
+    Attendance.deleteMany({}),
+    AttendanceCorrection.deleteMany({}),
+    LeaveType.deleteMany({}),
+    LeaveBalance.deleteMany({}),
+    LeaveRequest.deleteMany({}),
     // Reset the counters so codes restart at 0001 and stay deterministic.
     Counter.deleteMany({}),
   ]);
@@ -183,6 +199,82 @@ export async function runSeed({ reset = true }: { reset?: boolean } = {}): Promi
       refreshTokenExpiresAt: null,
       isDeleted: false,
     });
+  }
+
+  // --- Leave Types (§7, §12) ---
+  for (const seedLeaveType of LEAVE_TYPES) {
+    await LeaveType.create({
+      ...seedLeaveType,
+      isActive: true,
+      createdBy: null,
+      isDeleted: false,
+    });
+  }
+
+  // --- Holidays (§7, §12) ---
+  for (const seedHoliday of HOLIDAYS) {
+    await Holiday.create({
+      date: seedHoliday.date,
+      name: seedHoliday.name,
+      createdBy: null,
+      isDeleted: false,
+    });
+  }
+
+  const allEmployees = await Employee.find({ isDeleted: false });
+
+  // --- Leave Balances (§8.2, §12) ---
+  for (const emp of allEmployees) {
+    await initializeEmployeeBalances(emp._id, emp.dateOfJoining, emp.employmentType);
+  }
+
+  // --- Attendance for last 30 days (§8.5, §12) ---
+  const holidayDates = new Set(HOLIDAYS.map((h) => h.date));
+  const now = new Date();
+  const past30Days: string[] = [];
+  for (let i = 30; i >= 1; i--) {
+    const d = new Date(now.getTime() - i * 86_400_000);
+    past30Days.push(d.toISOString().slice(0, 10));
+  }
+
+  const attendanceBatch: Array<Record<string, unknown>> = [];
+  for (const dateStr of past30Days) {
+    const weekend = isWeekend(dateStr);
+    const isHol = holidayDates.has(dateStr);
+
+    for (const emp of allEmployees) {
+      if (emp.status === 'Relieved' && emp.lastWorkingDay && dateStr > emp.lastWorkingDay) {
+        continue;
+      }
+
+      if (isHol) {
+        attendanceBatch.push({
+          employeeId: emp._id,
+          date: dateStr,
+          status: 'Holiday',
+          note: HOLIDAYS.find((h) => h.date === dateStr)?.name ?? 'Holiday',
+          source: 'NightlyJob',
+          isDeleted: false,
+        });
+      } else if (!weekend) {
+        // Working day: 80% Present Office, 20% Present WFH
+        const isWfh = (emp.firstName.charCodeAt(0) + dateStr.charCodeAt(dateStr.length - 1)) % 5 === 0;
+        attendanceBatch.push({
+          employeeId: emp._id,
+          date: dateStr,
+          status: 'Present',
+          workMode: isWfh ? 'WFH' : 'Office',
+          checkIn: '09:30',
+          checkOut: '18:30',
+          source: 'Manual',
+          isDeleted: false,
+        });
+      }
+    }
+  }
+
+  if (attendanceBatch.length > 0) {
+    await Attendance.insertMany(attendanceBatch);
   }
 
   return {

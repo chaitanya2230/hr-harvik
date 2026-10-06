@@ -53,6 +53,19 @@ async function bootstrap(): Promise<void> {
   );
   await maintenanceQueue.close();
 
+  const attendanceQueue = new Queue(QUEUE_NAMES.attendanceNightly, { connection });
+  await attendanceQueue.add(
+    'nightly-attendance-sync',
+    {},
+    {
+      repeat: { pattern: '0 0 * * *' },
+      jobId: 'attendance:nightly-sync',
+      removeOnComplete: 100,
+      removeOnFail: 500,
+    },
+  );
+  await attendanceQueue.close();
+
   logger.info(
     { queues: workers.map((worker) => worker.name) },
     'Harvik HR worker started',

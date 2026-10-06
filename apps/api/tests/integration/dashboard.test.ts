@@ -72,10 +72,10 @@ describe('dashboard summary (§8.1)', () => {
     expect(metrics.fullTime).toBeGreaterThan(0);
     expect(scope.kind).toBe('organisation');
 
-    // Metrics without a data source yet are null, never fabricated zeros (P5/P6).
-    expect(metrics.onLeave).toBeNull();
+    // P5 introduces real onLeave metric; only pendingOnboarding remains unavailable (P6).
+    expect(typeof metrics.onLeave).toBe('number');
     expect(metrics.pendingOnboarding).toBeNull();
-    expect(unavailable.length).toBe(2);
+    expect(unavailable.length).toBe(1);
 
     // P2 & P4 metrics are real numbers recomputed from their collections.
     expect(typeof metrics.pendingAssetReturns).toBe('number');
@@ -119,8 +119,8 @@ describe('dashboard summary (§8.1)', () => {
     expect(links.newJoiners).toMatch(/^\/employees\?joinedFrom=\d{4}-\d{2}-\d{2}$/);
     expect(links.pendingAssetReturns).toBe('/assets/assignments?active=true');
     expect(links.pendingLicenseRevocations).toBe('/licenses/assignments?status=Assigned');
-    // No list exists yet for these phases — null, never a dead link.
-    expect(links.onLeave).toBeNull();
+    // P5 introduces /leave link for onLeave
+    expect(links.onLeave).toBe('/leave');
     expect(links.pendingOnboarding).toBeNull();
     expect(links.pendingDocumentGeneration).toBe('/documents');
   });

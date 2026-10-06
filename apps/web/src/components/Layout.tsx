@@ -17,6 +17,8 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/employees', label: 'Employees', permission: 'viewEmployeeDirectory' },
+  { to: '/attendance', label: 'Attendance' },
+  { to: '/leave', label: 'Leave' },
   { to: '/documents', label: 'Documents' },
   { to: '/assets', label: 'Assets' },
   { to: '/licenses', label: 'Licenses' },

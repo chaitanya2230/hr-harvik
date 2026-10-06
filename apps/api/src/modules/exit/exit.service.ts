@@ -8,6 +8,8 @@ import { User } from '../users/user.model';
 import { AssetAssignment } from '../assets/asset.model';
 import { LicenseAssignment } from '../licenses/license.model';
 import { AccessItem } from '../access/access.model';
+import { LeaveRequest } from '../leave/leave-request.model';
+import { LeaveBalance } from '../leave/leave-balance.model';
 import { revokeLicenseAssignment } from '../licenses/license.service';
 import { collectTeamIds } from '../employees/employee.scope';
 import { onEmployeeStatusChanged, type EmployeeContext } from '../employees/employee.service';
@@ -732,7 +734,24 @@ export async function relieveEmployee(
       // 2. Disable user login (§8.10, §14 item 16)
       await User.updateMany({ employeeId: employee._id }, { $set: { isActive: false } }, { session });
 
-      // 3. Mark exit complete
+      // 3. Cancel pending leave requests (§8.10)
+      const pendingLeaves = await LeaveRequest.find({
+        employeeId: employee._id,
+        status: 'Pending',
+        isDeleted: false,
+      }).session(session);
+
+      for (const pl of pendingLeaves) {
+        pl.status = 'Cancelled';
+        await pl.save({ session });
+        await LeaveBalance.updateOne(
+          { employeeId: employee._id, leaveTypeId: pl.leaveTypeId },
+          { $inc: { pending: -pl.days } },
+          { session },
+        );
+      }
+
+      // 4. Mark exit complete
       exit.stage = 'Relieved';
       exit.completedAt = new Date();
       if (isForced) {

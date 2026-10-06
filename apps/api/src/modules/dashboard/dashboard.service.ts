@@ -6,6 +6,8 @@ import { AssetAssignment } from '../assets/asset.model';
 import { LicenseAssignment } from '../licenses/license.model';
 import { AccessItem } from '../access/access.model';
 import { Exit } from '../exit/exit.model';
+import { LeaveRequest } from '../leave/leave-request.model';
+import { AttendanceCorrection } from '../attendance/correction.model';
 import { scopeIdsFor } from '../employees/employee.service';
 import { cacheGetJson, cacheSetJson } from '../../utils/cache';
 import { trustedFilter } from '../../utils/mongo';
@@ -19,18 +21,6 @@ import type { AuthAccount } from '../auth/auth.service';
  * Every number below is computed from MongoDB at request time (or read from the
  * 60-second Redis cache). Nothing is hardcoded and no fixture value is ever
  * returned.
- *
- * ## Metrics without a data source yet
- *
- * Three §8.1 metrics depend on collections that belong to later phases and do
- * not exist yet (`onLeave` → P5, `pendingOnboarding` → P6,
- * `pendingDocumentGeneration` → P4). The two P2 metrics (`pendingAssetReturns`,
- * `pendingLicenseRevocations`) are computed here since P2 owns those
- * collections — see D-32 for their exact definitions.
- *
- * Uncomputable metrics are returned as `null` with an entry in `unavailable`,
- * never as `0`. A zero would be a fabricated business claim. See
- * docs/DECISIONS.md D-26.
  */
 
 export type ScopeKind = 'organisation' | 'team' | 'self';
@@ -88,11 +78,6 @@ export interface DashboardSummary {
     pendingAssetReturns: number | null;
     pendingLicenseRevocations: number | null;
   };
-  /**
-   * §8.1 — cards are clickable and lead to filtered lists. A null href means
-   * no list exists yet (the owning phase has not shipped it); the UI renders
-   * those cards without a link rather than a dead one.
-   */
   links: Record<string, string | null>;
   unavailable: DashboardUnavailable[];
   recentlyJoined: EmployeeChip[];
@@ -136,8 +121,7 @@ const chip = (doc: {
 });
 
 /**
- * §8.1 quick actions. "Assign Asset" and "Assign Software License" go live in
- * P2; the rest name the phase that owns them.
+ * §8.1 quick actions.
  */
 const QUICK_ACTIONS: QuickAction[] = [
   { key: 'addEmployee', label: 'Add Employee', href: '/employees/new', enabled: true },
@@ -150,7 +134,6 @@ const QUICK_ACTIONS: QuickAction[] = [
 ];
 
 const UNAVAILABLE: DashboardUnavailable[] = [
-  { metric: 'onLeave', phase: 'P5', reason: 'Requires the Leave collection (approved leave today).' },
   { metric: 'pendingOnboarding', phase: 'P6', reason: 'Requires the Onboarding collection.' },
 ];
 
@@ -259,6 +242,9 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
     awaitingExit,
     recentlyJoinedDocs,
     leavingSoonDocs,
+    onLeaveCount,
+    pendingLeaveApprovals,
+    pendingAttendanceCorrections,
   ] = await Promise.all([
     count(counted()),
     count(counted({ employmentType: 'Full-Time' })),
@@ -291,6 +277,29 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
       .select('employeeCode firstName lastName designation employmentType status dateOfJoining lastWorkingDay')
       .lean()
       .exec(),
+    LeaveRequest.distinct('employeeId', {
+      status: 'Approved',
+      fromDate: trustedFilter({ $lte: today }),
+      toDate: trustedFilter({ $gte: today }),
+      isDeleted: false,
+      ...(visibleIds !== undefined
+        ? { employeeId: trustedFilter({ $in: Array.from(visibleIds).map((id) => new Types.ObjectId(id)) }) }
+        : {}),
+    }).then((ids) => ids.length),
+    LeaveRequest.countDocuments({
+      status: 'Pending',
+      isDeleted: false,
+      ...(visibleIds !== undefined
+        ? { employeeId: trustedFilter({ $in: Array.from(visibleIds).map((id) => new Types.ObjectId(id)) }) }
+        : {}),
+    }),
+    AttendanceCorrection.countDocuments({
+      status: 'Pending',
+      isDeleted: false,
+      ...(visibleIds !== undefined
+        ? { employeeId: trustedFilter({ $in: Array.from(visibleIds).map((id) => new Types.ObjectId(id)) }) }
+        : {}),
+    }),
   ]);
 
   return {
@@ -307,13 +316,19 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
       interns,
       freelancers,
       newJoiners,
-      onLeave: null,
+      onLeave: onLeaveCount,
       onNotice,
       leavingSoon,
       pendingHrActions: {
         key: 'pendingHrActions',
         label: 'Pending HR actions',
-        value: awaitingExit + pendingAssetReturns + pendingLicenseRevocations + pendingDocumentGeneration,
+        value:
+          awaitingExit +
+          pendingAssetReturns +
+          pendingLicenseRevocations +
+          pendingDocumentGeneration +
+          pendingLeaveApprovals +
+          pendingAttendanceCorrections,
         phase: null,
       },
       pendingOnboarding: null,
@@ -327,7 +342,7 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
       interns: '/employees?employmentType=Intern',
       freelancers: '/employees?employmentType=Freelancer',
       newJoiners: `/employees?joinedFrom=${newJoinerFrom}`,
-      onLeave: null,
+      onLeave: '/leave',
       onNotice: '/employees?status=On Notice',
       leavingSoon: '#leaving-soon',
       recentlyJoined: '#recently-joined',

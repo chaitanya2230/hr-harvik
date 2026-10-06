@@ -16,7 +16,7 @@ The API is written in TypeScript (`apps/api/tsconfig.json`) and emitted as
 **CommonJS**. ESM output would require explicit `.js` extensions on every
 relative import across roughly 40 files, which is an easy source of
 `ERR_MODULE_NOT_FOUND` failures in the built `dist/` and in the seed entrypoint
-that Compose invokes directly.
+that Compose invokes directly.  
 
 Cost: `dist/` is CJS. The frontend is unaffected — Vite serves ESM in the
 browser regardless.
@@ -584,6 +584,34 @@ AGENTS.md §7, §8.7, §8.10 mandate complete Document Lifecycle and Template Ma
 4. **Exit Linkage & Dashboard Integration**:
    - Generating an Experience Certificate or Relieving Letter automatically links the document ID to `exit.experienceLetterDocId` or `exit.relievingLetterDocId` and sets the corresponding exit checklist items (`doc-experience`, `doc-relieving`) to `Completed`.
    - The dashboard enables the `generateDocument` quick action, accurately computes `pendingDocumentGeneration` from pending exit checklist items, and invalidates Redis dashboard caches upon document and template writes.
+
+## D-36 — Phase 5 Attendance & Leave: Idempotent Ledger, Optimistic Concurrency & Nightly Reconciliation
+
+*Status: accepted · P5*
+
+AGENTS.md §7, §8.5, §8.6, §14 mandate Attendance and Leave Management:
+1. **Attendance Ledger & Rule Integrity**:
+   - Enforces unique compound index `(employeeId, date)` ensuring strict daily uniqueness.
+   - Blocks future attendance recordings with HTTP 422.
+   - Blocks attendance for Relieved employees on or after their locked `lastWorkingDay`.
+   - Validates work mode (`Office` / `WFH`) strictly on `Present` and `Half Day` records.
+   - Attendance corrections provide a structured employee request -> manager/HR approval workflow.
+2. **Nightly BullMQ Reconciliation Job**:
+   - Idempotently processes all active, probation, and on-notice employees.
+   - Marks company holidays as `Holiday` (source `NightlyJob`).
+   - Synchronizes approved leave days as `Leave` (source `LeaveSync`).
+   - Skips weekends without logging unmerited `Absent` records.
+   - Marks any unrecorded past working days as `Absent`.
+3. **Leave Accounting & Overdraft Prevention**:
+   - Pro-rated initial balance allocation based on employee joining month for the current calendar year.
+   - Working days computation dynamically excludes weekend days and company holidays. Single-day requests can be `0.5` half-day; multi-day half-day requests are forbidden. Overlapping leave requests are rejected.
+   - Under Mongoose `sanitizeFilter: true`, balance overdraft protection utilizes atomic conditional increments with optimistic concurrency (`pending: currentPending`) to prevent negative balances without `$expr`.
+   - Approval atomically decrements `pending`, increments `used`, and backfills the attendance calendar with `Leave` records.
+   - Cancellation restores balance allocations and removes synced attendance records.
+4. **Cross-Module Integrations & Dashboards**:
+   - Exit module integration: Relieving an employee automatically cancels all pending leave requests and restores reserved balances.
+   - Dynamic Dashboard: Calculates `onLeave` count from active approved leaves covering the current date, links `/leave` navigation, and aggregates pending leaves and attendance corrections into `pendingHrActions`.
+
 
 ---
 

@@ -11,6 +11,8 @@ import { useAssetAssignments } from '../assets/api';
 import { useAccessItems, useLicenseAssignments } from '../licenses/api';
 import { useExitForEmployee } from '../exit/api';
 import { EmployeeDocumentsTab } from '../documents/EmployeeDocumentsTab';
+import { EmployeeAttendanceTab } from '../attendance/EmployeeAttendanceTab';
+import { EmployeeLeaveTab } from '../leave/EmployeeLeaveTab';
 import { useAuth } from '../auth/auth-context';
 import { useToast } from '../../components/Toast';
 import { Card, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from '../../components/ui';
@@ -23,7 +25,7 @@ import { Card, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } f
  * never placeholder numbers.
  */
 
-type Tab = 'overview' | 'history' | 'assets' | 'software' | 'documents' | 'exit';
+type Tab = 'overview' | 'history' | 'assets' | 'software' | 'documents' | 'attendance' | 'leave' | 'exit';
 
 const TAB_LABELS: Record<Tab, string> = {
   overview: 'Overview',
@@ -31,13 +33,12 @@ const TAB_LABELS: Record<Tab, string> = {
   assets: 'Assets',
   software: 'Software & Access',
   documents: 'Documents',
+  attendance: 'Attendance',
+  leave: 'Leave',
   exit: 'Exit',
 };
 
-const FUTURE_TABS = [
-  { label: 'Attendance', phase: 'P5' },
-  { label: 'Leave', phase: 'P5' },
-] as const;
+const FUTURE_TABS: Array<{ label: string; phase: string }> = [];
 
 const STATUS_OPTIONS = ['Active', 'Probation', 'On Notice', 'Resigned', 'Relieved', 'Inactive'] as const;
 
@@ -145,7 +146,7 @@ export function EmployeeDetailPage() {
       </div>
 
       <div role="tablist" aria-label="Employee sections" className="mb-4 flex flex-wrap gap-1 border-b border-slate-200">
-        {(['overview', 'history', 'assets', 'software', 'exit'] as const).map((value) => (
+        {(['overview', 'history', 'assets', 'software', 'documents', 'attendance', 'leave', 'exit'] as const).map((value) => (
           <button
             key={value}
             type="button"
@@ -360,6 +361,10 @@ export function EmployeeDetailPage() {
       ) : null}
 
       {tab === 'documents' ? <EmployeeDocumentsTab employeeId={employee.id} /> : null}
+
+      {tab === 'attendance' ? <EmployeeAttendanceTab employeeId={employee.id} /> : null}
+
+      {tab === 'leave' ? <EmployeeLeaveTab employeeId={employee.id} /> : null}
 
       {tab === 'exit' ? (
         exitQuery.isPending ? (

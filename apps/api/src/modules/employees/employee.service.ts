@@ -14,6 +14,7 @@ import { hashPassword, type AuthAccount } from '../auth/auth.service';
 import { recordAudit } from '../audit/audit.service';
 import { collectTeamIds } from './employee.scope';
 import { invalidateDashboardCache } from '../dashboard/dashboard.cache';
+import { initializeEmployeeBalances } from '../leave/leave-balance.service';
 import { buildPagination, buildSort, listMeta, type Pagination } from '../../utils/http';
 import { encryptField } from '../../utils/crypto';
 import { trustedFilter } from '../../utils/mongo';
@@ -566,6 +567,9 @@ export async function createEmployee(body: CreateEmployeeBody, ctx: EmployeeCont
       isDeleted: false,
     });
   }
+
+  // §8.2 — "Creating employee auto-creates leave balances."
+  await initializeEmployeeBalances(created._id, created.dateOfJoining, created.employmentType);
 
   await recordAudit({
     ...ctx,

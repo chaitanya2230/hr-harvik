@@ -21,6 +21,8 @@ import { LicenseListPage } from './features/licenses/LicenseListPage';
 import { ExitListPage } from './features/exit/ExitListPage';
 import { ExitDetailPage } from './features/exit/ExitDetailPage';
 import { DocumentListPage } from './features/documents/DocumentListPage';
+import { AttendancePage } from './features/attendance/AttendancePage';
+import { LeavePage } from './features/leave/LeavePage';
 
 /**
  * AGENTS.md §9 — P1 routes.
@@ -154,6 +156,9 @@ export function App() {
             <Route path="exit/:employeeId" element={<ExitDetailPage />} />
             {/* P4 — Documents (AGENTS.md §8.7, §9) */}
             <Route path="documents" element={<DocumentListPage />} />
+            {/* P5 — Attendance & Leave (AGENTS.md §8.5, §8.6, §9) */}
+            <Route path="attendance" element={<AttendancePage />} />
+            <Route path="leave" element={<LeavePage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -30,6 +30,8 @@ export const PERMISSIONS = {
   manageLicenses: 'manageLicenses',
   manageDocuments: 'manageDocuments',
   manageDocumentTemplates: 'manageDocumentTemplates',
+  manageLeaveTypes: 'manageLeaveTypes',
+  manageAttendance: 'manageAttendance',
 } as const;
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
@@ -59,6 +61,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     PERMISSIONS.manageAssets,
     PERMISSIONS.manageLicenses,
     PERMISSIONS.manageDocuments,
+    PERMISSIONS.manageAttendance,
   ],
   Manager: [
     PERMISSIONS.approveTeamLeave,
@@ -143,6 +146,26 @@ export type LicenseAssignmentStatus = (typeof LICENSE_ASSIGNMENT_STATUSES)[numbe
 /** AGENTS.md §7 — Access item statuses. */
 export const ACCESS_STATUSES = ['Active', 'Revoked'] as const;
 export type AccessStatus = (typeof ACCESS_STATUSES)[number];
+
+/** AGENTS.md §7 — Attendance statuses. */
+export const ATTENDANCE_STATUSES = ['Present', 'Absent', 'Half Day', 'Holiday', 'Leave'] as const;
+export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
+
+/** AGENTS.md §7 — Work modes (Office / WFH). */
+export const WORK_MODES = ['Office', 'WFH'] as const;
+export type WorkMode = (typeof WORK_MODES)[number];
+
+/** AGENTS.md §7 — Attendance entry source. */
+export const ATTENDANCE_SOURCES = ['Manual', 'Self', 'Correction', 'NightlyJob', 'LeaveSync'] as const;
+export type AttendanceSource = (typeof ATTENDANCE_SOURCES)[number];
+
+/** AGENTS.md §7 — Attendance correction status. */
+export const ATTENDANCE_CORRECTION_STATUSES = ['Pending', 'Approved', 'Rejected'] as const;
+export type AttendanceCorrectionStatus = (typeof ATTENDANCE_CORRECTION_STATUSES)[number];
+
+/** AGENTS.md §7 — Leave request status. */
+export const LEAVE_REQUEST_STATUSES = ['Pending', 'Approved', 'Rejected', 'Cancelled'] as const;
+export type LeaveRequestStatus = (typeof LEAVE_REQUEST_STATUSES)[number];
 
 /** AGENTS.md §7 — A human-readable ID prefix per entity. */
 export const ID_PREFIXES = {

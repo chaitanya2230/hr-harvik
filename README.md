@@ -3,14 +3,16 @@
 Internal HR system for [Harvik Technologies](https://harviktech.com/), built
 against [`AGENTS.md`](./AGENTS.md).
 
-> **Phase status: P0 → P4 complete.**
+> **Phase status: P0 → P5 complete.**
 > Shipped so far: repository structure, MongoDB 7 replica set, Redis 7 + BullMQ,
 > Express API, JWT auth with refresh rotation, RBAC, audit logging, field-level
 > encryption, seed data, employees, Employee 360, dashboard, assets, licenses,
 > access items, exit/offboarding lifecycle, live checklists, clearances, guarded relieve,
 > documents, secure file streaming, versioning lineage, templates, PDFKit PDF generation,
-> exit document linkage, and the automated test suite (313 tests passing).
-> Not yet built: recruitment, onboarding, attendance, leave, reports, notifications.
+> exit document linkage, attendance ledger, attendance corrections, holiday management,
+> nightly BullMQ attendance reconciliation job, configurable leave types, pro-rated leave balances,
+> atomic overdraft-safe leave requests, and the automated test suite (347 tests passing).
+> Not yet built: recruitment, onboarding, reports, notifications.
 > Nothing in the UI displays invented data — there are no placeholder metrics.
 
 ---
@@ -178,8 +180,8 @@ The seed never prints the demo password and never logs it.
 ## 8. Verification
 
 ```bash
-npm test             # 296 tests / 19 files: unit + integration (mock Redis, real mongod 7)
-npm run test:docker  # the SAME 296 tests against the compose MongoDB + Redis 7
+npm test             # 347 tests / 22 files: unit + integration (mock Redis, real mongod 7)
+npm run test:docker  # the SAME tests against the compose MongoDB + Redis 7
 npm run lint         # eslint, api + web
 npm run build        # tsc (api) + vite build (web)
 ```
@@ -191,8 +193,8 @@ deliverable (§16) and no specs exist at P1.
 
 | Check | Result |
 | --- | --- |
-| `npm test` — 296 unit + integration tests, 19 files | pass (176 P0 + 38 P1 + 58 P2 + 24 P3) |
-| `npm run test:docker` — same 296 tests, real Redis 7 + `RedisStore` | pass |
+| `npm test` — 347 unit + integration tests, 22 files | pass (176 P0 + 38 P1 + 58 P2 + 24 P3 + 17 P4 + 34 P5) |
+| `npm run test:docker` — same tests, real Redis 7 + `RedisStore` | pass |
 | `npm run lint` — api and web | pass |
 | `npm run typecheck` — api and web `tsconfig.json` | pass |
 | `npm run build` — api `tsc` and web `vite build` (127+ modules) | pass |
@@ -315,6 +317,41 @@ Base prefix `/api/v1`.
 | `GET` | `/api/v1/access` | bearer + scope | scoped access ledger |
 | `GET` | `/api/v1/access/:id` | bearer + scope | scoped single read |
 | `POST` | `/api/v1/access/:id/revoke` | bearer + `manageLicenses` | mark revoked |
+| `POST` | `/api/v1/exit/initiate` | bearer + `manageExits` | initiate exit lifecycle |
+| `GET` | `/api/v1/exit` | bearer + `manageExits` | list active and completed exits |
+| `GET` | `/api/v1/exit/:id` | bearer + scope | exit detail, live checklist & clearances |
+| `PATCH` | `/api/v1/exit/:id/checklist/:itemId` | bearer + `manageExits` | mark checklist item status |
+| `PATCH` | `/api/v1/exit/:id/clearance` | bearer + scope | submit departmental clearance |
+| `POST` | `/api/v1/exit/:id/relieve` | bearer + `manageExits` | atomic relieve (forceReason for HR Admin) |
+| `POST` | `/api/v1/exit/:id/withdraw` | bearer + `manageExits` | cancel exit on resignation withdrawal |
+| `GET` | `/api/v1/documents` | bearer + scope | list documents by category & scope |
+| `POST` | `/api/v1/documents/upload` | bearer + scope | secure multi-format upload (max 10MB) |
+| `GET` | `/api/v1/documents/:id` | bearer + scope | document metadata |
+| `GET` | `/api/v1/documents/:id/file` | bearer + scope | authenticated streaming download |
+| `GET` | `/api/v1/documents/:id/history` | bearer + scope | document revision lineage |
+| `POST` | `/api/v1/documents/generate` | bearer + `manageTemplates` | generate PDF from Handlebars template |
+| `GET` | `/api/v1/documents/templates` | bearer + scope | list document templates |
+| `POST` | `/api/v1/documents/templates` | bearer + `manageTemplates` | create document template |
+| `POST` | `/api/v1/documents/templates/preview` | bearer + `manageTemplates` | preview compiled HTML |
+| `GET` | `/api/v1/attendance` | bearer + scope | list daily attendance ledger |
+| `POST` | `/api/v1/attendance` | bearer + scope | mark attendance (self/manual) |
+| `GET` | `/api/v1/attendance/monthly` | bearer + scope | monthly grid attendance view |
+| `GET` | `/api/v1/attendance/corrections` | bearer + scope | list attendance correction requests |
+| `POST` | `/api/v1/attendance/corrections` | bearer + `requestSelfAttendanceCorrection` | request attendance correction |
+| `POST` | `/api/v1/attendance/corrections/:id/review` | bearer + `approveAttendanceCorrections` | approve or reject correction |
+| `GET` | `/api/v1/attendance/holidays` | bearer | list configured company holidays |
+| `POST` | `/api/v1/attendance/holidays` | bearer + `manageAttendance` | add company holiday |
+| `DELETE` | `/api/v1/attendance/holidays/:id` | bearer + `manageAttendance` | delete company holiday |
+| `GET` | `/api/v1/leave/types` | bearer | list leave types |
+| `POST` | `/api/v1/leave/types` | bearer + `manageLeaveTypes` | create leave type |
+| `PATCH` | `/api/v1/leave/types/:id` | bearer + `manageLeaveTypes` | update leave type |
+| `GET` | `/api/v1/leave/balances` | bearer + scope | employee leave balances |
+| `POST` | `/api/v1/leave/balances/rollover` | bearer + `manageLeaveTypes` | annual balance rollover |
+| `GET` | `/api/v1/leave/requests` | bearer + scope | list leave requests |
+| `POST` | `/api/v1/leave/requests` | bearer + `applySelfLeave` | apply for leave (optimistic locking) |
+| `POST` | `/api/v1/leave/requests/:id/review` | bearer + `approveLeaveRequests` | approve/reject leave |
+| `POST` | `/api/v1/leave/requests/:id/cancel` | bearer + scope | cancel pending/approved leave |
+| `GET` | `/api/v1/leave/calendar` | bearer + scope | team leave calendar |
 
 Responses:
 
@@ -377,9 +414,9 @@ consume the budget.
 | 1 | Dashboard (14 metrics, 7 quick actions) | `modules/dashboard` | **P1 done** — real MongoDB data, 60s cache, 5 future metrics honestly `null`, 7 API tests |
 | 3 | Recruitment | `modules/recruitment` | P6 |
 | 4 | Onboarding | `modules/onboarding` | P6 |
-| 5 | Attendance | `modules/attendance` | P5 |
-| 6 | Leave | `modules/leave` | P5 |
-| 7 | Documents (upload, versions, PDF templates) | `modules/documents` | P4 |
+| 5 | Attendance | `modules/attendance` | **P5 done** — ledger, daily/monthly grid, corrections, holidays, nightly job, 15 API tests |
+| 6 | Leave | `modules/leave` | **P5 done** — types, balances, requests, calendar, optimistic locking, 19 API tests |
+| 7 | Documents (upload, versions, PDF templates) | `modules/documents` | **P4 done** — secure storage, versions, Handlebars, PDFKit, 17 API tests |
 | 8 | Hardware / assets | `modules/assets` | **P2 done** — CRUD, assign/return/repair/retire, history, overdue, 26 API tests |
 | 9 | Software / licences / access | `modules/licenses`, `modules/access` | **P2 done** — CRUD, atomic seats, revoke/renew/suspend/expire, utilization, audited reveal, 32 API tests |
 | 10 | Exit / offboarding | `modules/exit` | **P3 done** — lifecycle, checklist, clearances, guarded relieve, force-relieve, 24 API tests |
@@ -400,8 +437,8 @@ stubbed, so nothing can accidentally depend on non-existent behaviour.
 | **P1** | departments, employees, Employee 360, status machine, dashboard | complete — backend, 38 API tests, frontend, verified |
 | **P2** | assets, licences, seats, access items, transactions | complete — backend, 58 API tests, frontend, verified below |
 | **P3** | exit, checklist, clearances, relieve guard, force-relieve | complete — backend, 24 API tests, frontend, verified |
-| P4 | documents, secure serving, versions, PDF templates | not started |
-| P5 | attendance, corrections, leave, balances, nightly jobs | not started |
+| **P4** | documents, secure serving, versions, PDF templates | complete — backend, 17 API tests, frontend, verified |
+| **P5** | attendance, corrections, leave, balances, nightly jobs | complete — backend, 34 API tests, frontend, verified |
 | P6 | recruitment, candidates, onboarding | not started |
 | P7 | reports, exports, notifications, BullMQ reminders | not started |
 | P8 | hardening, Playwright E2E, OpenAPI, docs | not started |

@@ -378,3 +378,57 @@ export const DOCUMENT_TEMPLATES: readonly SeedDocumentTemplate[] = [
 <p>We thank you for your contributions and wish you the best in your future career.</p>`,
   },
 ];
+
+export const LEAVE_TYPES = [
+  {
+    name: 'Casual Leave',
+    code: 'CASUAL',
+    annualAllocation: 12,
+    carryForward: false,
+    maxCarryForward: 0,
+    isPaid: true,
+    requiresDocument: false,
+    applicableEmploymentTypes: ['Full-Time', 'Intern', 'Contractor', 'Other'],
+  },
+  {
+    name: 'Sick Leave',
+    code: 'SICK',
+    annualAllocation: 10,
+    carryForward: false,
+    maxCarryForward: 0,
+    isPaid: true,
+    requiresDocument: true,
+    applicableEmploymentTypes: ['Full-Time'],
+  },
+  {
+    name: 'Earned Leave',
+    code: 'EARNED',
+    annualAllocation: 15,
+    carryForward: true,
+    maxCarryForward: 10,
+    isPaid: true,
+    requiresDocument: false,
+    applicableEmploymentTypes: ['Full-Time'],
+  },
+  {
+    name: 'Unpaid Leave',
+    code: 'UNPAID',
+    annualAllocation: 0,
+    carryForward: false,
+    maxCarryForward: 0,
+    isPaid: false,
+    requiresDocument: false,
+    applicableEmploymentTypes: ['Full-Time', 'Intern', 'Freelancer', 'Contractor', 'Other'],
+  },
+];
+
+const currentYear = new Date().getUTCFullYear();
+export const HOLIDAYS = [
+  { date: `${currentYear}-01-01`, name: "New Year's Day" },
+  { date: `${currentYear}-01-26`, name: 'Republic Day' },
+  { date: `${currentYear}-05-01`, name: 'International Workers Day' },
+  { date: `${currentYear}-08-15`, name: 'Independence Day' },
+  { date: `${currentYear}-10-02`, name: 'Gandhi Jayanti' },
+  { date: `${currentYear}-11-01`, name: 'Diwali' },
+  { date: `${currentYear}-12-25`, name: 'Christmas Day' },
+];
