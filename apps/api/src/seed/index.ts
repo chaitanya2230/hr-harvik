@@ -9,6 +9,8 @@ import { AuditLog } from '../modules/audit/audit.model';
 import { Asset, AssetAssignment } from '../modules/assets/asset.model';
 import { License, LicenseAssignment } from '../modules/licenses/license.model';
 import { AccessItem } from '../modules/access/access.model';
+import { Document } from '../modules/documents/document.model';
+import { DocumentTemplate } from '../modules/documents/template.model';
 import { hashPassword } from '../modules/auth/auth.service';
 import { encryptField } from '../utils/crypto';
 import { nextHumanId } from '../utils/ids';
@@ -18,6 +20,7 @@ import {
   ASSETS,
   DEPARTMENTS,
   DEMO_USERS,
+  DOCUMENT_TEMPLATES,
   EMPLOYEES,
   LICENSES,
   type SeedEmployee,
@@ -67,6 +70,8 @@ const clearCollections = async (): Promise<void> => {
     LicenseAssignment.deleteMany({}),
     License.deleteMany({}),
     AccessItem.deleteMany({}),
+    Document.deleteMany({}),
+    DocumentTemplate.deleteMany({}),
     // Reset the counters so codes restart at 0001 and stay deterministic.
     Counter.deleteMany({}),
   ]);
@@ -319,6 +324,19 @@ async function seedP2Fixtures(
       revokedAt: null,
       revokedBy: null,
       linkedLicenseAssignmentId: linkedId,
+      createdBy: null,
+      isDeleted: false,
+    });
+  }
+
+  // --- Document Templates (§7, §12) ---
+  for (const seedTemplate of DOCUMENT_TEMPLATES) {
+    await DocumentTemplate.create({
+      name: seedTemplate.name,
+      category: seedTemplate.category,
+      applicableEmploymentTypes: seedTemplate.applicableEmploymentTypes,
+      bodyHtml: seedTemplate.bodyHtml,
+      isActive: true,
       createdBy: null,
       isDeleted: false,
     });

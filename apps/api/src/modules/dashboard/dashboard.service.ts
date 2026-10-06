@@ -5,6 +5,7 @@ import type { EmployeeDoc } from '../employees/employee.schema';
 import { AssetAssignment } from '../assets/asset.model';
 import { LicenseAssignment } from '../licenses/license.model';
 import { AccessItem } from '../access/access.model';
+import { Exit } from '../exit/exit.model';
 import { scopeIdsFor } from '../employees/employee.service';
 import { cacheGetJson, cacheSetJson } from '../../utils/cache';
 import { trustedFilter } from '../../utils/mongo';
@@ -142,16 +143,15 @@ const QUICK_ACTIONS: QuickAction[] = [
   { key: 'addEmployee', label: 'Add Employee', href: '/employees/new', enabled: true },
   { key: 'addCandidate', label: 'Add Candidate', href: '/recruitment/candidates/new', enabled: false, phase: 'P6' },
   { key: 'startOnboarding', label: 'Start Onboarding', href: '/onboarding', enabled: false, phase: 'P6' },
-  { key: 'generateDocument', label: 'Generate Document', href: '/documents', enabled: false, phase: 'P4' },
+  { key: 'generateDocument', label: 'Generate Document', href: '/documents', enabled: true },
   { key: 'assignAsset', label: 'Assign Asset', href: '/assets', enabled: true },
   { key: 'assignLicense', label: 'Assign Software License', href: '/licenses', enabled: true },
-  { key: 'processExit', label: 'Process Exit', href: '/exit', enabled: false, phase: 'P3' },
+  { key: 'processExit', label: 'Process Exit', href: '/exit', enabled: true },
 ];
 
 const UNAVAILABLE: DashboardUnavailable[] = [
   { metric: 'onLeave', phase: 'P5', reason: 'Requires the Leave collection (approved leave today).' },
   { metric: 'pendingOnboarding', phase: 'P6', reason: 'Requires the Onboarding collection.' },
-  { metric: 'pendingDocumentGeneration', phase: 'P4', reason: 'Requires the Documents collection.' },
 ];
 
 export async function buildDashboardSummary(account: AuthAccount): Promise<DashboardSummary> {
@@ -228,6 +228,26 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
       employeeId: noticeIdFilter,
     }).exec());
 
+  const openExits = await Exit.find({
+    isDeleted: false,
+    stage: trustedFilter({ $nin: ['Relieved', 'Cancelled'] }),
+    ...(visibleIds === undefined
+      ? {}
+      : { employeeId: trustedFilter({ $in: [...visibleIds].map((id) => new Types.ObjectId(id)) }) }),
+  })
+    .select('checklist')
+    .lean()
+    .exec();
+
+  let pendingDocumentGeneration = 0;
+  for (const ex of openExits) {
+    for (const item of ex.checklist || []) {
+      if (item.category === 'document' && item.status === 'Pending') {
+        pendingDocumentGeneration += 1;
+      }
+    }
+  }
+
   const [
     totalEmployees,
     fullTime,
@@ -252,9 +272,7 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
         lastWorkingDay: trustedFilter({ $gte: today, $lte: leavingUntil }),
       }),
     ),
-    // §8.1 definition: pending HR actions is the sum of its components. Only the
-    // exit-awaiting, asset-return and license-revocation components are computable
-    // before P4/P5/P6/P7; the rest stay documented in `unavailable`.
+    // §8.1 definition: pending HR actions is the sum of its components.
     count(base({ status: trustedFilter({ $in: ['On Notice', 'Resigned'] }) })),
     Employee.find(counted())
       .sort({ dateOfJoining: -1, employeeCode: -1 })
@@ -295,11 +313,11 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
       pendingHrActions: {
         key: 'pendingHrActions',
         label: 'Pending HR actions',
-        value: awaitingExit + pendingAssetReturns + pendingLicenseRevocations,
+        value: awaitingExit + pendingAssetReturns + pendingLicenseRevocations + pendingDocumentGeneration,
         phase: null,
       },
       pendingOnboarding: null,
-      pendingDocumentGeneration: null,
+      pendingDocumentGeneration,
       pendingAssetReturns,
       pendingLicenseRevocations,
     },
@@ -315,7 +333,7 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
       recentlyJoined: '#recently-joined',
       pendingHrActions: null,
       pendingOnboarding: null,
-      pendingDocumentGeneration: null,
+      pendingDocumentGeneration: '/documents',
       pendingAssetReturns: '/assets/assignments?active=true',
       pendingLicenseRevocations: '/licenses/assignments?status=Assigned',
     },

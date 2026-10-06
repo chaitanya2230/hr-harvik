@@ -563,6 +563,28 @@ Crucially:
 
 Under global Mongoose `sanitizeFilter: true`, MongoDB operator queries such as `{ $nin: ['Relieved', 'Cancelled'] }` and `{ $ne: 'Cancelled' }` require explicit trusted filtering to prevent Mongoose wrapping operators into `$eq`. Following D-27, all server-constructed operator fragments in `exit.service.ts` use `trustedFilter()` from `apps/api/src/utils/mongo.ts`. All exit routes are wrapped with `asyncHandler()` to ensure async errors and rejections properly propagate through Express error handling.
 
+## D-35 — Phase 4 Documents: Storage Security, Versioning Lineage, PDFKit & Exit Linkage
+
+*Status: accepted · P4*
+
+AGENTS.md §7, §8.7, §8.10 mandate complete Document Lifecycle and Template Management:
+1. **Secure Storage & Serving**:
+   - Uploads are capped at 10 MB with dual MIME validation (declared header + magic byte file signature inspection for PDF, DOCX, DOC, JPEG, PNG).
+   - Filenames are randomized with UUIDs on disk; original filenames are preserved exclusively as metadata.
+   - Files are stored in a private directory (`/data/uploads`) completely unmapped from static web routes (Nginx returns 404 for `/uploads/`).
+   - Downloads are authenticated streaming endpoints (`GET /api/v1/documents/:id/file`) enforcing RBAC (Employee self-service, Manager team-scoping via `collectTeamIds`, HR Admin/Manager unrestricted, confidential documents strictly restricted to HR).
+2. **Versioning & Lineage**:
+   - Version updates increment `version` and track explicit parent lineage via `previousVersionId`.
+   - History queries trace the parent/child lineage bidirectionally to provide a strictly ordered chronological revision chain.
+3. **Template Engine & PDF Generation**:
+   - Templates use Handlebars with rich contextual bindings (`employee`, `company`, `exit`, `today`).
+   - All template HTML is sanitized via `sanitize-html` before compilation to neutralize script injections and dangerous attributes.
+   - Generation validates token completeness, applicable employment types, and restricts Experience Certificates to employees with status `On Notice` or `Relieved`.
+   - Uses `pdfkit` for deterministic, fast PDF rendering without headless browser dependencies.
+4. **Exit Linkage & Dashboard Integration**:
+   - Generating an Experience Certificate or Relieving Letter automatically links the document ID to `exit.experienceLetterDocId` or `exit.relievingLetterDocId` and sets the corresponding exit checklist items (`doc-experience`, `doc-relieving`) to `Completed`.
+   - The dashboard enables the `generateDocument` quick action, accurately computes `pendingDocumentGeneration` from pending exit checklist items, and invalidates Redis dashboard caches upon document and template writes.
+
 ---
 
 ## Known gaps carried into later phases
@@ -574,6 +596,6 @@ Under global Mongoose `sanitizeFilter: true`, MongoDB operator queries such as `
 | ~~`rate-limit-redis` store unexercised~~ | **CLOSED (P0).** `npm run test:docker` runs the same 176 tests with `RATE_LIMIT_STORE=redis` against Redis 7 (D-04, D-16). Beyond the suite, the 5/min/IP limit, `skipSuccessfulRequests` and per-IP isolation were each measured against the live RedisStore through nginx, with the resulting per-IP bucket keys observed in Redis. | Closed |
 | ~~`/ready` could hang instead of answering~~ | **CLOSED (P0).** Probes are bounded (D-19); verified live by stopping MongoDB — 503 in 4–85 ms, `/health` unaffected. | Closed |
 | ~~403 over HTTP through the compose stack~~ | **CLOSED (P1).** P1 mounts `requirePermission` on the employee routes, so 403 is now reachable over HTTP and covered by `employees.test.ts` (Manager/Employee denials on list/create/delete, out-of-scope reads). | Closed |
-| Bank/licence field masking in list responses | The modules that own those fields are P2/P4 | P2, P4 |
-| ~~Manager team scoping (recursive, depth 5)~~ | **CLOSED (P1).** `collectTeamIds` walks `reportingManagerId` breadth-first, capped at depth 5 and cycle-safe; covered by team-read and team-dashboard tests. | Closed |
+| Bank/licence field masking in list responses | Masked in normal responses; unmasked only for HR Admin or self | P2, P4 |
+| ~~Manager team scoping (recursive, depth 5)~~ | **CLOSED (P1).** `collectTeamIds` walks `reportingManagerId` breadth-first, capped at depth 5 and cycle-safe; covered by team-read, team-dashboard, and document scoping tests. | Closed |
 | Playwright E2E specs | P8 deliverable; the web workspace has no unit-test runner yet | P8 |

@@ -307,3 +307,53 @@ export interface ExitView {
   createdAt: string;
   updatedAt: string;
 }
+
+export type DocumentCategory =
+  | 'Offer Letter'
+  | 'Agreement'
+  | 'NDA'
+  | 'Experience Certificate'
+  | 'Relieving Letter'
+  | 'Appraisal'
+  | 'Identity'
+  | 'Education'
+  | 'Other';
+
+export type DocumentSource = 'Uploaded' | 'Generated';
+
+export interface DocumentFileMeta {
+  filename: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  path: string;
+}
+
+export interface DocumentItem {
+  id: string;
+  employeeId: string;
+  category: DocumentCategory;
+  title: string;
+  file: DocumentFileMeta;
+  version: number;
+  previousVersionId?: string | null;
+  source: DocumentSource;
+  templateId?: string | null;
+  expiryDate?: string | null;
+  confidential: boolean;
+  uploadedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DocumentTemplateItem {
+  id: string;
+  name: string;
+  category: DocumentCategory;
+  applicableEmploymentTypes: EmploymentType[];
+  bodyHtml: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+

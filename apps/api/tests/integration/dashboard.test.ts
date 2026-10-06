@@ -72,16 +72,15 @@ describe('dashboard summary (§8.1)', () => {
     expect(metrics.fullTime).toBeGreaterThan(0);
     expect(scope.kind).toBe('organisation');
 
-    // Metrics without a data source yet are null, never fabricated zeros.
-    // P2 computes pendingAssetReturns/pendingLicenseRevocations (D-32).
+    // Metrics without a data source yet are null, never fabricated zeros (P5/P6).
     expect(metrics.onLeave).toBeNull();
     expect(metrics.pendingOnboarding).toBeNull();
-    expect(metrics.pendingDocumentGeneration).toBeNull();
-    expect(unavailable.length).toBe(3);
+    expect(unavailable.length).toBe(2);
 
-    // P2 metrics are real numbers recomputed from the ledger below.
+    // P2 & P4 metrics are real numbers recomputed from their collections.
     expect(typeof metrics.pendingAssetReturns).toBe('number');
     expect(typeof metrics.pendingLicenseRevocations).toBe('number');
+    expect(typeof metrics.pendingDocumentGeneration).toBe('number');
 
     expect(Array.isArray(recentlyJoined)).toBe(true);
     expect(quickActions.find((a: { key: string }) => a.key === 'addEmployee').enabled).toBe(true);
@@ -123,7 +122,7 @@ describe('dashboard summary (§8.1)', () => {
     // No list exists yet for these phases — null, never a dead link.
     expect(links.onLeave).toBeNull();
     expect(links.pendingOnboarding).toBeNull();
-    expect(links.pendingDocumentGeneration).toBeNull();
+    expect(links.pendingDocumentGeneration).toBe('/documents');
   });
 
   it('uses the 60s Redis cache and invalidates on employee writes', async () => {

@@ -20,6 +20,8 @@
     "seed": "npm run seed --workspace=apps/api",
     "test": "npm run test --workspace=apps/api",
     "test:coverage": "npm run test:coverage --workspace=apps/api",
+    "test:docker": "npm run test:docker --workspace=apps/api",
+    "typecheck": "npm run typecheck --workspace=apps/api && npm run typecheck --workspace=apps/web",
     "lint": "npm run lint --workspace=apps/api && npm run lint --workspace=apps/web",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

@@ -7,6 +7,7 @@ import { assetRouter } from '../modules/assets/asset.routes';
 import { licenseRouter } from '../modules/licenses/license.routes';
 import { accessRouter } from '../modules/access/access.routes';
 import { exitRouter } from '../modules/exit/exit.routes';
+import { documentRouter, documentTemplateRouter } from '../modules/documents/document.routes';
 
 /**
  * AGENTS.md §10 — every endpoint lives under the `/api/v1` prefix.
@@ -15,8 +16,8 @@ import { exitRouter } from '../modules/exit/exit.routes';
  *   P0 auth
  *   P1 departments, employees, dashboard
  *   P2 assets, licenses, access
- *   P3 exit                                         <- registered
- *   P4 documents
+ *   P3 exit
+ *   P4 documents                                    <- registered
  *   P5 attendance, leave
  *   P6 recruitment, onboarding
  *   P7 reports, notifications
@@ -31,3 +32,6 @@ apiRouter.use('/assets', assetRouter);
 apiRouter.use('/licenses', licenseRouter);
 apiRouter.use('/access', accessRouter);
 apiRouter.use('/exit', exitRouter);
+apiRouter.use('/documents', documentRouter);
+apiRouter.use('/document-templates', documentTemplateRouter);
+

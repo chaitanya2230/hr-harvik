@@ -20,6 +20,7 @@ import { LicenseForm } from './features/licenses/LicenseForm';
 import { LicenseListPage } from './features/licenses/LicenseListPage';
 import { ExitListPage } from './features/exit/ExitListPage';
 import { ExitDetailPage } from './features/exit/ExitDetailPage';
+import { DocumentListPage } from './features/documents/DocumentListPage';
 
 /**
  * AGENTS.md §9 — P1 routes.
@@ -151,6 +152,8 @@ export function App() {
             {/* P3 — Exit / Offboarding (AGENTS.md §8.10, §9) */}
             <Route path="exit" element={<ExitListPage />} />
             <Route path="exit/:employeeId" element={<ExitDetailPage />} />
+            {/* P4 — Documents (AGENTS.md §8.7, §9) */}
+            <Route path="documents" element={<DocumentListPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

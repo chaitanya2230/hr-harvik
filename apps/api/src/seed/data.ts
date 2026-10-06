@@ -308,3 +308,73 @@ export const ACCESS_ITEMS: readonly SeedAccessItem[] = [
   { employeeKey: 'karan', system: 'Slack', identifier: '@karan', linkedLicense: 'Slack Pro' },
   { employeeKey: 'rohit', system: 'VPN', identifier: 'rohit.vpn' },
 ];
+
+export interface SeedDocumentTemplate {
+  name: string;
+  category: string;
+  applicableEmploymentTypes: string[];
+  bodyHtml: string;
+}
+
+export const DOCUMENT_TEMPLATES: readonly SeedDocumentTemplate[] = [
+  {
+    name: 'Full-Time Employment Offer',
+    category: 'Offer Letter',
+    applicableEmploymentTypes: ['Full-Time'],
+    bodyHtml: `<h2>OFFER OF EMPLOYMENT</h2>
+<p>Dear {{employee.firstName}} {{employee.lastName}},</p>
+<p>We are delighted to offer you the position of <strong>{{employee.designation}}</strong> at <strong>{{company.name}}</strong>. We were very impressed by your background and skills and believe you will make a great addition to our team.</p>
+<p>Your employment will commence on <strong>{{employee.dateOfJoining}}</strong>. You will report to the department head in <strong>{{employee.department}}</strong>.</p>
+<hr />
+<h3>Terms of Employment:</h3>
+<p><strong>Designation:</strong> {{employee.designation}}</p>
+<p><strong>Employment Type:</strong> {{employee.employmentType}}</p>
+<p><strong>Joining Date:</strong> {{employee.dateOfJoining}}</p>
+<hr />
+<p>Please confirm your acceptance of this offer by signing and returning a copy of this letter.</p>
+<p>Sincerely,</p>
+<p>{{company.name}} HR Operations</p>`,
+  },
+  {
+    name: 'Internship Offer Letter',
+    category: 'Offer Letter',
+    applicableEmploymentTypes: ['Intern'],
+    bodyHtml: `<h2>INTERNSHIP OFFER LETTER</h2>
+<p>Dear {{employee.firstName}} {{employee.lastName}},</p>
+<p>On behalf of <strong>{{company.name}}</strong>, we are pleased to offer you an internship position as <strong>{{employee.designation}}</strong>.</p>
+<p>Your internship will begin on <strong>{{employee.dateOfJoining}}</strong> in the <strong>{{employee.department}}</strong> department.</p>
+<hr />
+<p>During your internship, you will have the opportunity to gain practical experience, collaborate on production engineering initiatives, and work under senior mentorship.</p>
+<p>Welcome to the team!</p>`,
+  },
+  {
+    name: 'Standard Non-Disclosure Agreement (NDA)',
+    category: 'NDA',
+    applicableEmploymentTypes: ['Full-Time', 'Intern', 'Freelancer', 'Contractor', 'Other'],
+    bodyHtml: `<h2>NON-DISCLOSURE AND CONFIDENTIALITY AGREEMENT</h2>
+<p>This Non-Disclosure Agreement ("Agreement") is entered into as of <strong>{{today}}</strong> by and between <strong>{{company.name}}</strong> and <strong>{{employee.fullName}}</strong> (Employee Code: {{employee.employeeCode}}).</p>
+<p>The Employee agrees that all proprietary technical information, source code, customer data, and business strategies disclosed during their engagement remain the exclusive property of {{company.name}}.</p>
+<p>The Employee shall maintain strict confidentiality during and following the tenure of employment.</p>`,
+  },
+  {
+    name: 'Experience Certificate',
+    category: 'Experience Certificate',
+    applicableEmploymentTypes: ['Full-Time', 'Intern', 'Freelancer', 'Contractor', 'Other'],
+    bodyHtml: `<h2>EXPERIENCE CERTIFICATE</h2>
+<p>TO WHOMSOEVER IT MAY CONCERN</p>
+<p>This is to certify that <strong>{{employee.fullName}}</strong> (Employee Code: {{employee.employeeCode}}) was employed with <strong>{{company.name}}</strong> as <strong>{{employee.designation}}</strong> from <strong>{{employee.dateOfJoining}}</strong>.</p>
+<p>During their tenure with us, they demonstrated strong technical proficiency, professional integrity, and exemplary dedication.</p>
+<p>We wish them every success in all future professional endeavors.</p>`,
+  },
+  {
+    name: 'Relieving Letter',
+    category: 'Relieving Letter',
+    applicableEmploymentTypes: ['Full-Time', 'Intern', 'Freelancer', 'Contractor', 'Other'],
+    bodyHtml: `<h2>RELIEVING LETTER</h2>
+<p>Date: {{today}}</p>
+<p>Dear {{employee.fullName}},</p>
+<p>This has reference to your resignation from the services of <strong>{{company.name}}</strong>. We confirm that you have been relieved from your duties as <strong>{{employee.designation}}</strong> effective the close of business.</p>
+<p>All company assets and clearances have been completed in accordance with offboarding protocol.</p>
+<p>We thank you for your contributions and wish you the best in your future career.</p>`,
+  },
+];

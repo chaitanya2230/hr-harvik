@@ -10,6 +10,7 @@ import {
 import { useAssetAssignments } from '../assets/api';
 import { useAccessItems, useLicenseAssignments } from '../licenses/api';
 import { useExitForEmployee } from '../exit/api';
+import { EmployeeDocumentsTab } from '../documents/EmployeeDocumentsTab';
 import { useAuth } from '../auth/auth-context';
 import { useToast } from '../../components/Toast';
 import { Card, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from '../../components/ui';
@@ -17,23 +18,23 @@ import { Card, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } f
 /**
  * AGENTS.md §8.2 — Employee 360 view.
  *
- * Overview, Employment History, Assets and Software & Access carry real data.
+ * Overview, Employment History, Assets, Software & Access, Documents, and Exit carry real data.
  * The tabs owned by later phases render an explicit "arrives in Pn" notice —
  * never placeholder numbers.
  */
 
-type Tab = 'overview' | 'history' | 'assets' | 'software' | 'exit';
+type Tab = 'overview' | 'history' | 'assets' | 'software' | 'documents' | 'exit';
 
 const TAB_LABELS: Record<Tab, string> = {
   overview: 'Overview',
   history: 'Employment History',
   assets: 'Assets',
   software: 'Software & Access',
+  documents: 'Documents',
   exit: 'Exit',
 };
 
 const FUTURE_TABS = [
-  { label: 'Documents', phase: 'P4' },
   { label: 'Attendance', phase: 'P5' },
   { label: 'Leave', phase: 'P5' },
 ] as const;
@@ -357,6 +358,8 @@ export function EmployeeDetailPage() {
           </Card>
         </div>
       ) : null}
+
+      {tab === 'documents' ? <EmployeeDocumentsTab employeeId={employee.id} /> : null}
 
       {tab === 'exit' ? (
         exitQuery.isPending ? (

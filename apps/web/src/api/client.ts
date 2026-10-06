@@ -96,16 +96,18 @@ export async function apiRequest<T>(
   path: string,
   { body, skipRefresh, headers, ...rest }: RequestOptions = {},
 ): Promise<T> {
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+
   const send = async (): Promise<Response> =>
     fetch(`${BASE}${path}`, {
       ...rest,
       credentials: 'include',
       headers: {
-        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(body === undefined || isFormData ? {} : { 'Content-Type': 'application/json' }),
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...headers,
       },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(body === undefined ? {} : isFormData ? { body } : { body: JSON.stringify(body) }),
     });
 
   let response = await send();
@@ -123,4 +125,45 @@ export async function apiRequest<T>(
   if (response.status === 204) return undefined as T;
 
   return (await response.json()) as T;
+}
+
+export async function apiDownload(path: string, fallbackFilename = 'document.pdf'): Promise<void> {
+  const send = async (): Promise<Response> =>
+    fetch(`${BASE}${path}`, {
+      credentials: 'include',
+      headers: {
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+    });
+
+  let response = await send();
+
+  if (response.status === 401) {
+    if (await attemptRefresh()) {
+      response = await send();
+    } else {
+      accessToken = null;
+      throw new SessionExpiredError();
+    }
+  }
+
+  if (!response.ok) return parseError(response);
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+
+  const disp = response.headers.get('Content-Disposition');
+  let filename = fallbackFilename;
+  if (disp && disp.includes('filename=')) {
+    const match = disp.match(/filename="?([^";]+)"?/);
+    if (match && match[1]) filename = decodeURIComponent(match[1]);
+  }
+
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
 }

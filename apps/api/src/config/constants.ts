@@ -28,6 +28,8 @@ export const PERMISSIONS = {
   provideManagerClearance: 'provideManagerClearance',
   manageAssets: 'manageAssets',
   manageLicenses: 'manageLicenses',
+  manageDocuments: 'manageDocuments',
+  manageDocumentTemplates: 'manageDocumentTemplates',
 } as const;
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
@@ -56,6 +58,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     // (including delete, which is soft or history-guarded) is an HR operation.
     PERMISSIONS.manageAssets,
     PERMISSIONS.manageLicenses,
+    PERMISSIONS.manageDocuments,
   ],
   Manager: [
     PERMISSIONS.approveTeamLeave,
@@ -64,6 +67,24 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ],
   Employee: [],
 };
+
+/** AGENTS.md §7 — Document categories. */
+export const DOCUMENT_CATEGORIES = [
+  'Offer Letter',
+  'Agreement',
+  'NDA',
+  'Experience Certificate',
+  'Relieving Letter',
+  'Appraisal',
+  'Identity',
+  'Education',
+  'Other',
+] as const;
+export type DocumentCategory = (typeof DOCUMENT_CATEGORIES)[number];
+
+/** AGENTS.md §7 — Document sources. */
+export const DOCUMENT_SOURCES = ['Uploaded', 'Generated'] as const;
+export type DocumentSource = (typeof DOCUMENT_SOURCES)[number];
 
 /** AGENTS.md §7 — Employee statuses. */
 export const EMPLOYEE_STATUSES = [
