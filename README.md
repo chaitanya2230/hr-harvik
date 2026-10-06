@@ -172,24 +172,24 @@ The seed never prints the demo password and never logs it.
 ## 8. Verification
 
 ```bash
-npm test             # 176 tests / 13 files: unit + integration (mock Redis, real mongod 7)
-npm run test:docker  # the SAME 176 tests against the compose MongoDB + Redis 7
+npm test             # 214 tests / 15 files: unit + integration (mock Redis, real mongod 7)
+npm run test:docker  # the SAME 214 tests against the compose MongoDB + Redis 7
 npm run lint         # eslint, api + web
 npm run build        # tsc (api) + vite build (web)
 ```
 
 The web workspace has no unit-test runner yet; Playwright E2E is a P8
-deliverable (§16) and no specs exist at P0.
+deliverable (§16) and no specs exist at P1.
 
 ### Verification status
 
 | Check | Result |
 | --- | --- |
-| `npm test` — 176 unit + integration tests, 13 files | pass |
-| `npm run test:docker` — same 176 tests, real Redis 7 + `RedisStore` | pass |
+| `npm test` — 214 unit + integration tests, 15 files | pass (176 P0 + 38 P1) |
+| `npm run test:docker` — same 214 tests, real Redis 7 + `RedisStore` | pass |
 | `npm run lint` — api and web | pass |
 | `npm run typecheck` — api `tsconfig.json` and `tsconfig.test.json` | pass |
-| `npm run build` — api `tsc` and web `vite build` (91 modules, 298 kB JS) | pass |
+| `npm run build` — api `tsc` and web `vite build` (114 modules, 432 kB JS) | pass |
 | `docker compose config` | pass — `mongo rs-init redis worker api nginx` |
 | `docker compose build` | pass |
 | `docker compose up -d --build` | pass — 6 services, all healthy |
@@ -214,17 +214,16 @@ deliverable (§16) and no specs exist at P0.
 | `/uploads/…` never publicly served (§13) | pass — direct guess 404, traversal 400 |
 | All four demo roles log in through nginx | pass |
 | `docker compose run --rm seed`, run twice | pass — 5 departments / 11 employees / 4 users, idempotent |
-| 403 over HTTP | **not reachable at P0** — see below |
+| P1 employees through nginx | pass — create → HRV-####, 409 duplicate email, search/filter, 360 tabs, history, status machine, re-hire, audit |
+| P1 dashboard through nginx | pass — 14 metric keys, values match MongoDB, 60s cache + invalidation on write, team/personal scoping |
+| 403 over HTTP | **reachable since P1** — employee routes enforce `requirePermission`; Manager/Employee denials and out-of-scope reads covered |
 
-> **403 is not reachable at P0 — stated plainly rather than papered over.**
-> Every P0 route is mounted with `requireAuth` only. `requireRoles` and
-> `requirePermission` exist and are correct, but no P0 route uses them, because
-> every role-gated business route belongs to P1 or later. So a 403 cannot occur
-> through the running container — not because authorisation is weak, but because
-> there is nothing yet that distinguishes an authenticated caller from an
-> unauthorised one. Enforcement is proven instead by
-> `tests/integration/rbac-api.test.ts` (19 tests) driving the real middleware.
-> The first P1 route behind `requireRoles` should be re-verified over HTTP.
+> **403 became reachable in P1.**
+> P0 mounted only `requireAuth`, so no route could return 403. P1 mounts
+> `requirePermission` on the employee routes, and `employees.test.ts` covers
+> Manager/Employee denials plus out-of-scope reads over HTTP. The P0 probe suite
+> `tests/integration/rbac-api.test.ts` (19 tests) still covers the middleware
+> itself.
 
 `npm run test:docker` needs the services up first:
 
@@ -258,7 +257,7 @@ Test suite notes:
 
 ---
 
-## 9. API surface (P0)
+## 9. API surface (P0 + P1)
 
 Base prefix `/api/v1`.
 
@@ -271,6 +270,16 @@ Base prefix `/api/v1`.
 | `POST` | `/api/v1/auth/logout` | refresh cookie | denylists the refresh token, clears the cookie |
 | `GET` | `/api/v1/auth/me` | bearer | current account + permissions |
 | `POST` | `/api/v1/auth/change-password` | bearer | enforces the §6 password policy |
+| `GET` | `/api/v1/employees` | bearer + `viewEmployeeDirectory` | paginated directory, search/filter/sort (HR roles) |
+| `POST` | `/api/v1/employees` | bearer + `createEmployee` | create employee, optional login |
+| `GET` | `/api/v1/employees/:id` | bearer + scope | 360 projection (HR any, Manager team, Employee self) |
+| `GET` | `/api/v1/employees/:id/history` | bearer + scope | status + employment timelines |
+| `PATCH` | `/api/v1/employees/:id` | bearer + `updateEmployee` | update, type change appends history |
+| `POST` | `/api/v1/employees/:id/status` | bearer + `updateEmployee` | status machine, HR-Admin re-hire |
+| `DELETE` | `/api/v1/employees/:id` | bearer + `deleteEmployee` | soft delete (HR Admin only) |
+| `GET` | `/api/v1/departments` | bearer | scoped department list for pickers |
+| `GET` | `/api/v1/departments/manager-options` | bearer | assignable managers (HR roles) |
+| `GET` | `/api/v1/dashboard/summary` | bearer + scope | 14 metrics, 60s Redis cache |
 
 Responses:
 
@@ -329,8 +338,8 @@ consume the budget.
 | — | Human-readable IDs (HRV/ASSET/JOB/LIC/CAN) | `modules/counters`, `utils/ids` | **P0 done** |
 | — | Config validation, logging, errors, `/health`, `/ready` | `config/env`, `utils/logger`, `utils/errors`, `modules/health` | **P0 done** |
 | — | Seed data + four demo logins | `src/seed` | **P0 done** (HR-scoped fixtures) |
-| 2 | Employee management, Employee 360 | `modules/employees` | P1 — schema present, endpoints pending |
-| 1 | Dashboard (14 metrics, 7 quick actions) | `modules/dashboard` | P1 |
+| 2 | Employee management, Employee 360 | `modules/employees` | **P1 done** — CRUD, 360, history, status machine, re-hire, 31 API tests |
+| 1 | Dashboard (14 metrics, 7 quick actions) | `modules/dashboard` | **P1 done** — real MongoDB data, 60s cache, 5 future metrics honestly `null`, 7 API tests |
 | 3 | Recruitment | `modules/recruitment` | P6 |
 | 4 | Onboarding | `modules/onboarding` | P6 |
 | 5 | Attendance | `modules/attendance` | P5 |
@@ -353,7 +362,7 @@ stubbed, so nothing can accidentally depend on non-existent behaviour.
 | Phase | Scope | Status |
 | --- | --- | --- |
 | **P0** | repo, Docker Compose, Mongo rs0, Redis, API, worker, web, nginx, config, logging, errors, health, auth, RBAC, audit, IDs, encryption, seed, tests | complete |
-| P1 | departments, employees, Employee 360, status machine, dashboard | not started |
+| **P1** | departments, employees, Employee 360, status machine, dashboard | complete — backend, 38 API tests, frontend, verified below |
 | P2 | assets, licences, seats, access items, transactions | not started |
 | P3 | exit, checklist, clearances, relieve guard, force-relieve | not started |
 | P4 | documents, secure serving, versions, PDF templates | not started |

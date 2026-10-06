@@ -393,6 +393,84 @@ useless: a worker that cannot serve HTTP must not be probed over HTTP.
 
 ---
 
+## D-22 — Request-validation schemas live in `employee.validation.ts`
+
+*Status: accepted · P1*
+
+`employee.schema.ts` is already the Mongoose schema (P0 baseline, depended on by
+the seed and the ID generator). Overwriting it with Zod schemas — or vice versa —
+would have destroyed working P0 code. The Zod request schemas therefore live in a
+sibling file, `employee.validation.ts`. The split is deliberate and permanent:
+`* .schema.ts` = persistence shape, `*.validation.ts` = request shape.
+
+## D-23 — Departments get a read-only list in P1, not CRUD
+
+*Status: accepted · P1*
+
+AGENTS.md §16 lists departments as a P1 deliverable, but §8.2 specifies no
+department endpoints, and §6 reserves system configuration for HR Admin. P1 ships
+the minimum the employee form actually needs: `GET /departments` (scoped
+headcounts) and `GET /departments/manager-options` (assignable managers, Relieved
+excluded). Department create/update/delete is system-settings work and stays
+unimplemented until the settings module owns it.
+
+## D-24 — "Probation when probation configured" read as Full-Time → Probation
+
+*Status: accepted · P1*
+
+AGENTS.md §8.2: "Default Full-Time status is Probation when probation
+configured." There is no probation-configuration setting in P1 (settings are a
+later phase), so the clause is read at face value: a Full-Time hire starts on
+Probation, every other employment type starts Active. An explicit `status` in the
+request body always wins, subject to the new-hire edge check. If a future settings
+module adds a probation toggle, this default is the single place to consult it
+(`defaultStatusFor` in `employee.service.ts`).
+
+## D-25 — P1 owns the status transition; P3 owns the Exit side effect
+
+*Status: accepted · P1*
+
+AGENTS.md §8.2 requires that moving an employee to On Notice / Resigned
+auto-creates an Exit record and checklist — but the Exit model, service and
+checklist are P3. P1 performs only the status change itself (validated, audited,
+`lastWorkingDay` persisted) and emits an in-process `EmployeeStatusChangedEvent`
+via `onEmployeeStatusChanged`. P3 subscribes to that event and creates the Exit.
+No Exit document, collection, or placeholder is created in P1 — verified by a
+test asserting the `exits` collection does not exist after an On-Notice
+transition. The same rule applies to the §8.2 "auto-create leave balances /
+onboarding checklist" lines: P5 and P6 own those collections, P1 creates neither.
+
+## D-26 — Dashboard metrics without a data source are `null`, never `0`
+
+*Status: accepted · P1*
+
+Five of the fourteen §8.1 metrics (`onLeave`, `pendingOnboarding`,
+`pendingDocumentGeneration`, `pendingAssetReturns`, `pendingLicenseRevocations`)
+depend on collections owned by P2/P4/P5/P6, which do not exist yet. Returning `0`
+would be a fabricated business claim — it asserts nobody is on leave when in fact
+nobody has recorded any leave yet. Each is returned as `null` with a matching
+entry in `unavailable` naming the owning phase. `pendingHrActions` carries the one
+P1-computable component (employees On Notice / Resigned awaiting exit
+processing) with the same honest labelling.
+
+## D-27 — Server-built filters use Mongoose `trusted()`, P0 sanitize stays on
+
+*Status: accepted · P1*
+
+P0 sets `sanitizeFilter: true` globally, which wraps ANY filter value containing
+`$` keys in `$eq` — including legitimate operators. P0 never noticed because it
+issues no operator queries; the first P1 `$in` query threw `CastError` on every
+read path (scope resolution, listing, dashboard, department counts). The global
+was deliberately left untouched — it is P0 defense-in-depth and removing it
+would weaken §11 NoSQL protection. Instead, server-constructed operator
+fragments go through `trustedFilter()` (`src/utils/mongo.ts`), Mongoose's
+official escape hatch. This is safe because operators are hard-coded by the
+server; user input only supplies scalars already constrained by Zod schemas and
+stripped by `express-mongo-sanitize`. Rule for later phases: wrap the
+operator-bearing value, never a filter containing user-supplied objects.
+
+---
+
 ## Known gaps carried into later phases
 
 | Gap | Why | Owner |
@@ -401,7 +479,7 @@ useless: a worker that cannot serve HTTP must not be probed over HTTP.
 | ~~BullMQ worker unexercised~~ | **CLOSED (P0).** Worker connects to Redis 7 and is healthy. Functionally proven, not just registered: a job enqueued from a separate process was consumed cross-container, executed and completed (`attempts made: 1`; the handler's return-value timestamp matches the worker log line to the millisecond). | Closed |
 | ~~`rate-limit-redis` store unexercised~~ | **CLOSED (P0).** `npm run test:docker` runs the same 176 tests with `RATE_LIMIT_STORE=redis` against Redis 7 (D-04, D-16). Beyond the suite, the 5/min/IP limit, `skipSuccessfulRequests` and per-IP isolation were each measured against the live RedisStore through nginx, with the resulting per-IP bucket keys observed in Redis. | Closed |
 | ~~`/ready` could hang instead of answering~~ | **CLOSED (P0).** Probes are bounded (D-19); verified live by stopping MongoDB — 503 in 4–85 ms, `/health` unaffected. | Closed |
-| 403 over HTTP through the compose stack | **P0 ships no role-gated route.** Every P0 route is mounted with `requireAuth`; `requireRoles`/`requirePermission` are implemented but unused until P1 adds business routes. So 403 is structurally unreachable from the container — not weak, just not yet reachable. Enforcement is covered by `rbac-api.test.ts` (19 tests) against the real middleware. | P1 — re-verify over HTTP once the first guarded route exists |
+| ~~403 over HTTP through the compose stack~~ | **CLOSED (P1).** P1 mounts `requirePermission` on the employee routes, so 403 is now reachable over HTTP and covered by `employees.test.ts` (Manager/Employee denials on list/create/delete, out-of-scope reads). | Closed |
 | Bank/licence field masking in list responses | The modules that own those fields are P2/P4 | P2, P4 |
-| Manager team scoping (recursive, depth 5) | Needs the employees module | P1 |
+| ~~Manager team scoping (recursive, depth 5)~~ | **CLOSED (P1).** `collectTeamIds` walks `reportingManagerId` breadth-first, capped at depth 5 and cycle-safe; covered by team-read and team-dashboard tests. | Closed |
 | Playwright E2E specs | P8 deliverable; the web workspace has no unit-test runner yet | P8 |

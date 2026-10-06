@@ -2,12 +2,21 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './features/auth/AuthProvider';
 import { useAuth } from './features/auth/auth-context';
 import { LoginPage } from './features/auth/LoginPage';
+import { Layout } from './components/Layout';
+import { ToastProvider } from './components/Toast';
+import { DashboardPage } from './features/dashboard/DashboardPage';
+import { EmployeeDetailPage } from './features/employees/EmployeeDetailPage';
+import { EmployeeEditPage } from './features/employees/EmployeeEditPage';
+import { EmployeeForm } from './features/employees/EmployeeForm';
+import { EmployeeListPage } from './features/employees/EmployeeListPage';
+import { MyProfilePage } from './features/employees/MyProfilePage';
 
 /**
- * AGENTS.md §16 P0 — the shell is intentionally limited to authentication.
+ * AGENTS.md §9 — P1 routes.
  *
- * There are no employee, dashboard, leave or document screens yet; those are
- * P1+ and must read real API data, so nothing here renders placeholder metrics.
+ * `/employees/*` requires the directory capability; the guard here mirrors the
+ * backend so unauthorised users never see the screen — but the backend remains
+ * authoritative and refuses them anyway.
  */
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { account, initialising } = useAuth();
@@ -26,58 +35,62 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function HomePage() {
-  const { account, signOut } = useAuth();
-
-  return (
-    <main className="min-h-screen bg-slate-50 px-6 py-10">
-      <div className="mx-auto max-w-3xl space-y-6">
-        <header className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Harvik HR</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Signed in as {account?.email} · {account?.role}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => void signOut()}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100"
-          >
-            Sign out
-          </button>
-        </header>
-
-        <section
-          aria-label="Phase status"
-          className="rounded-lg border border-slate-200 bg-white p-5 text-sm text-slate-600"
-        >
-          <h2 className="text-base font-medium text-slate-900">Foundation ready</h2>
-          <p className="mt-1">
-            Authentication, RBAC and the operational endpoints are live. Employee, dashboard,
-            leave, document and asset screens arrive in the later build phases.
-          </p>
-        </section>
-      </div>
-    </main>
-  );
+function RequirePermission({
+  permission,
+  children,
+}: {
+  permission: string;
+  children: React.ReactNode;
+}) {
+  const { account } = useAuth();
+  if (!account?.permissions.includes(permission)) return <Navigate to="/" replace />;
+  return <>{children}</>;
 }
 
 export function App() {
   return (
     <AuthProvider>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/"
-          element={
-            <RequireAuth>
-              <HomePage />
-            </RequireAuth>
-          }
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <ToastProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            element={
+              <RequireAuth>
+                <Layout />
+              </RequireAuth>
+            }
+          >
+            <Route index element={<DashboardPage />} />
+            <Route
+              path="employees"
+              element={
+                <RequirePermission permission="viewEmployeeDirectory">
+                  <EmployeeListPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="employees/new"
+              element={
+                <RequirePermission permission="createEmployee">
+                  <EmployeeForm />
+                </RequirePermission>
+              }
+            />
+            <Route path="employees/:id" element={<EmployeeDetailPage />} />
+            <Route
+              path="employees/:id/edit"
+              element={
+                <RequirePermission permission="updateEmployee">
+                  <EmployeeEditPage />
+                </RequirePermission>
+              }
+            />
+            <Route path="me" element={<MyProfilePage />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </ToastProvider>
     </AuthProvider>
   );
 }
