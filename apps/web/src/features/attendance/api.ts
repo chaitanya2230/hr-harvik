@@ -53,14 +53,28 @@ export interface HolidayRecord {
   name: string;
 }
 
-export function useAttendanceList(params: {
-  date?: string;
-  month?: string;
-  status?: string;
-  employeeId?: string;
-  page?: number;
-  limit?: number;
-}) {
+/**
+ * AGENTS.md §8.5 / §10 — attendance list read. Mirrors `GET /api/v1/attendance`,
+ * whose real query surface is `date`, `month` (YYYY-MM, enforced by the
+ * controller), `status`, `employeeId`, `departmentId`, `page` and `limit`
+ * (server-capped at 100); the response carries
+ * `meta: { total, page, limit }` so tables can paginate server-side.
+ *
+ * `enabled` lets a view hold the request until it knows which employee to
+ * ask for (e.g. the Calendar tab waiting on its picker) without inventing
+ * backend parameters.
+ */
+export function useAttendanceList(
+  params: {
+    date?: string;
+    month?: string;
+    status?: string;
+    employeeId?: string;
+    page?: number;
+    limit?: number;
+  },
+  enabled = true,
+) {
   const query = new URLSearchParams();
   if (params.date) query.set('date', params.date);
   if (params.month) query.set('month', params.month);
@@ -71,6 +85,7 @@ export function useAttendanceList(params: {
 
   return useQuery({
     queryKey: ['attendance', params],
+    enabled,
     queryFn: () =>
       apiRequest<{ data: AttendanceRecord[]; meta: { total: number; page: number; limit: number } }>(
         `/attendance?${query.toString()}`,

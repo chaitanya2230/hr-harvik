@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useAuth } from '../auth/auth-context';
 import { useToast } from '../../components/Toast';
 import {
@@ -16,7 +16,98 @@ import {
   useMonthlyAttendanceGrid,
   useRequestCorrection,
   useReviewCorrection,
+  type AttendanceRecord,
 } from './api';
+
+/**
+ * AGENTS.md §8.5 — status → badge colours shared by the Daily, Calendar and
+ * History views so a status always renders the same colour everywhere.
+ */
+const STATUS_BADGE_CLASSES: Record<string, string> = {
+  Present: 'bg-emerald-100 text-emerald-800',
+  Absent: 'bg-rose-100 text-rose-800',
+  'Half Day': 'bg-blue-100 text-blue-800',
+  Leave: 'bg-amber-100 text-amber-800',
+  Holiday: 'bg-purple-100 text-purple-800',
+};
+
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
+const MONTH_LABELS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+] as const;
+
+/**
+ * AGENTS.md §8.5 — pure `YYYY-MM` helpers for the Calendar tab's month
+ * navigation. Uses UTC arithmetic so daylight-saving shifts can never move a
+ * date across a month boundary.
+ */
+function shiftMonth(yearMonth: string, delta: number): string {
+  const year = parseInt(yearMonth.slice(0, 4), 10);
+  const month = parseInt(yearMonth.slice(5, 7), 10);
+  const d = new Date(Date.UTC(year, month - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function formatMonthLabel(yearMonth: string): string {
+  const monthIndex = parseInt(yearMonth.slice(5, 7), 10) - 1;
+  return `${MONTH_LABELS[monthIndex] ?? ''} ${yearMonth.slice(0, 4)}`;
+}
+
+/**
+ * AGENTS.md §9 — employee picker for the Calendar/History tabs. The option
+ * roster comes from the team-scoped monthly grid (§8.5), so a Manager only
+ * ever sees their own reporting hierarchy and an Employee never sees a picker
+ * at all; the backend remains the authority on scope (§6).
+ */
+function EmployeePicker({
+  id,
+  label,
+  value,
+  onChange,
+  options,
+  allowAll,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ id: string; employeeCode: string; name: string }>;
+  allowAll: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <label htmlFor={id} className="text-sm font-medium text-slate-700">
+        {label}
+      </label>
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+      >
+        {allowAll && <option value="">All employees</option>}
+        {options.length === 0 && <option value="">No employees available</option>}
+        {options.map((opt) => (
+          <option key={opt.id} value={opt.id}>
+            {opt.name} ({opt.employeeCode})
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
 
 export function AttendancePage() {
   const { account } = useAuth();
@@ -27,10 +118,22 @@ export function AttendancePage() {
   const today = new Date().toISOString().slice(0, 10);
   const currentMonth = today.slice(0, 7);
 
-  const [activeTab, setActiveTab] = useState<'daily' | 'monthly' | 'corrections' | 'holidays'>('daily');
+  const [activeTab, setActiveTab] = useState<
+    'daily' | 'monthly' | 'calendar' | 'history' | 'corrections' | 'holidays'
+  >('daily');
   const [selectedDate, setSelectedDate] = useState(today);
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [page, setPage] = useState(1);
+
+  // Calendar tab (AGENTS.md §8.5) — one month, one selected employee.
+  const [calendarMonth, setCalendarMonth] = useState(currentMonth);
+  const [calendarEmployeeId, setCalendarEmployeeId] = useState('');
+
+  // History tab (AGENTS.md §8.5) — filterable, server-paginated chronology.
+  const [historyMonth, setHistoryMonth] = useState(currentMonth);
+  const [historyStatus, setHistoryStatus] = useState('');
+  const [historyEmployeeId, setHistoryEmployeeId] = useState('');
+  const [historyPage, setHistoryPage] = useState(1);
 
   // Modals
   const [showMarkModal, setShowMarkModal] = useState(false);
@@ -68,6 +171,74 @@ export function AttendancePage() {
   const monthlyQuery = useMonthlyAttendanceGrid(selectedMonth);
   const correctionsQuery = useAttendanceCorrections();
   const holidaysQuery = useHolidays(parseInt(selectedMonth.slice(0, 4), 10));
+
+  // --- Calendar & History tabs (AGENTS.md §8.5, §6) ------------------------
+  // The monthly grid returns one row per employee in the caller's scope
+  // (HR → everybody, Manager → reporting hierarchy, Employee → self), so it
+  // doubles as the picker roster without calling the HR-only /employees list.
+  const isSelfScoped = account?.role === 'Employee';
+  const roster = monthlyQuery.data?.records.map((r) => r.employee) ?? [];
+
+  // Calendar always targets exactly one employee: the viewer's own record
+  // when one exists, otherwise the first employee of the scoped roster.
+  const defaultEmployeeId =
+    roster.find((e) => e.id === account?.employeeId)?.id ??
+    roster[0]?.id ??
+    account?.employeeId ??
+    '';
+  const calendarTargetId = calendarEmployeeId || defaultEmployeeId;
+
+  // AGENTS.md §10 — only parameters the backend actually implements are sent:
+  // month (YYYY-MM), status, employeeId, page and limit (capped at 100).
+  const calendarQuery = useAttendanceList(
+    { month: calendarMonth, employeeId: calendarTargetId || undefined, limit: 100 },
+    Boolean(calendarTargetId),
+  );
+  const historyQuery = useAttendanceList({
+    month: historyMonth || undefined,
+    status: historyStatus || undefined,
+    // The Employee role is self-scoped server-side; never send a picker id.
+    employeeId: isSelfScoped ? undefined : historyEmployeeId || undefined,
+    page: historyPage,
+    limit: 20,
+  });
+
+  const historyMeta = historyQuery.data?.meta;
+  const historyPageCount = historyMeta
+    ? Math.max(1, Math.ceil(historyMeta.total / historyMeta.limit))
+    : 1;
+  const historyRows = historyQuery.data?.data ?? [];
+  // Omit the Employee column for the self-scoped Employee view when the
+  // payload carries no employee info (AGENTS.md §6 RBAC / §8.5 views).
+  const showEmployeeColumn = !isSelfScoped || historyRows.some((row) => row.employeeId != null);
+
+  // Month view data: attendance records keyed by date, plus a fixed 6-week
+  // (42-cell) grid of days for the selected month.
+  const calendarRecordsByDate = useMemo(() => {
+    const map = new Map<string, AttendanceRecord>();
+    for (const record of calendarQuery.data?.data ?? []) {
+      map.set(record.date, record);
+    }
+    return map;
+  }, [calendarQuery.data]);
+
+  const calendarCells = useMemo(() => {
+    const year = parseInt(calendarMonth.slice(0, 4), 10);
+    const month = parseInt(calendarMonth.slice(5, 7), 10);
+    const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const startWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+    const cells: Array<{ date: string; day: number; weekday: number } | null> = [];
+    for (let i = 0; i < startWeekday; i += 1) cells.push(null);
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      cells.push({
+        date: `${calendarMonth}-${String(day).padStart(2, '0')}`,
+        day,
+        weekday: new Date(Date.UTC(year, month - 1, day)).getUTCDay(),
+      });
+    }
+    while (cells.length < 42) cells.push(null);
+    return cells;
+  }, [calendarMonth]);
 
   const markMutation = useMarkAttendance();
   const correctionMutation = useRequestCorrection();
@@ -174,6 +345,8 @@ export function AttendancePage() {
           [
             { id: 'daily', label: 'Daily Attendance' },
             { id: 'monthly', label: 'Monthly Grid' },
+            { id: 'calendar', label: 'Calendar' },
+            { id: 'history', label: 'History' },
             { id: 'corrections', label: 'Corrections' },
             { id: 'holidays', label: 'Holidays' },
           ] as const
@@ -318,6 +491,339 @@ export function AttendancePage() {
                 </tbody>
               </table>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Calendar Tab — AGENTS.md §8.5 month view for one selected employee */}
+      {activeTab === 'calendar' && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCalendarMonth((m) => shiftMonth(m, -1))}
+                aria-label="Previous month"
+                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                ‹
+              </button>
+              <span className="min-w-36 text-center text-sm font-semibold text-slate-800">
+                {formatMonthLabel(calendarMonth)}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCalendarMonth((m) => shiftMonth(m, 1))}
+                aria-label="Next month"
+                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                ›
+              </button>
+              <button
+                type="button"
+                onClick={() => setCalendarMonth(currentMonth)}
+                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Today
+              </button>
+            </div>
+            {/* §6 — Employee role is self-scoped; the picker is never rendered. */}
+            {!isSelfScoped && (
+              <EmployeePicker
+                id="calendar-employee-picker"
+                label="Employee:"
+                value={calendarTargetId}
+                onChange={setCalendarEmployeeId}
+                options={roster}
+                allowAll={false}
+              />
+            )}
+          </div>
+
+          {!calendarTargetId ? (
+            <EmptyState
+              title="No employee selected"
+              hint="Waiting for the employee list to load — pick an employee to see their calendar."
+            />
+          ) : calendarQuery.isPending ? (
+            <LoadingState label="Loading calendar..." />
+          ) : calendarQuery.isError ? (
+            <ErrorState error={calendarQuery.error} onRetry={() => void calendarQuery.refetch()} />
+          ) : (
+            <>
+              <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <table className="w-full table-fixed border-collapse text-xs">
+                  <caption className="sr-only">
+                    {`Attendance calendar for ${formatMonthLabel(calendarMonth)}`}
+                  </caption>
+                  <thead>
+                    <tr>
+                      {WEEKDAY_LABELS.map((label) => (
+                        <th
+                          key={label}
+                          scope="col"
+                          className="border border-slate-200 bg-slate-50 px-2 py-2 text-center font-medium text-slate-700"
+                        >
+                          {label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 6 }, (_, week) => (
+                      <tr key={week}>
+                        {calendarCells.slice(week * 7, week * 7 + 7).map((cell, cellIndex) => {
+                          if (!cell) {
+                            return (
+                              <td
+                                key={`${week}-${cellIndex}`}
+                                aria-hidden="true"
+                                className="h-16 border border-slate-200 bg-slate-50/60"
+                              />
+                            );
+                          }
+                          const record = calendarRecordsByDate.get(cell.date);
+                          const isWeekend = cell.weekday === 0 || cell.weekday === 6;
+                          const title = record
+                            ? `${record.date}: ${record.status}${
+                                record.workMode ? ` · ${record.workMode}` : ''
+                              }${record.checkIn ? ` · in ${record.checkIn}` : ''}${
+                                record.checkOut ? ` · out ${record.checkOut}` : ''
+                              }`
+                            : isWeekend
+                              ? `${cell.date}: weekend — no attendance record expected`
+                              : `${cell.date}: no attendance record`;
+                          return (
+                            <td
+                              key={cell.date}
+                              title={title}
+                              className="h-16 border border-slate-200 p-1 align-top"
+                            >
+                              <span
+                                className={`block text-[10px] font-medium ${
+                                  isWeekend && !record ? 'text-slate-400' : 'text-slate-500'
+                                }`}
+                              >
+                                {cell.day}
+                              </span>
+                              {record ? (
+                                <span
+                                  className={`mt-1 block truncate rounded px-1 py-0.5 text-center text-[10px] font-medium ${
+                                    STATUS_BADGE_CLASSES[record.status] ?? 'bg-slate-100 text-slate-700'
+                                  }`}
+                                >
+                                  {record.status}
+                                </span>
+                              ) : isWeekend ? (
+                                <span className="mt-1 block rounded bg-slate-100 px-1 py-0.5 text-center text-[10px] text-slate-500">
+                                  Weekend
+                                </span>
+                              ) : (
+                                <span
+                                  className="mt-1 block text-center text-[10px] text-slate-400"
+                                  aria-label="No attendance record"
+                                >
+                                  —
+                                </span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Legend — §9 accessibility: statuses are explained below the grid. */}
+              <ul
+                className="flex flex-wrap items-center gap-4 text-xs text-slate-600"
+                aria-label="Calendar legend"
+              >
+                <li className="flex items-center gap-1.5">
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-800">
+                    Present
+                  </span>
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="rounded-full bg-rose-100 px-2 py-0.5 font-medium text-rose-800">
+                    Absent
+                  </span>
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="rounded-full bg-blue-100 px-2 py-0.5 font-medium text-blue-800">
+                    Half Day
+                  </span>
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">
+                    Leave
+                  </span>
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="rounded-full bg-purple-100 px-2 py-0.5 font-medium text-purple-800">
+                    Holiday
+                  </span>
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-500">
+                    Weekend
+                  </span>
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="text-slate-400">— No record</span>
+                </li>
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* History Tab — AGENTS.md §8.5 filterable chronological attendance table */}
+      {activeTab === 'history' && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-4 rounded-lg border border-slate-200 bg-white p-3">
+            <div className="flex items-center gap-2">
+              <label htmlFor="history-month" className="text-sm font-medium text-slate-700">
+                Month:
+              </label>
+              <input
+                id="history-month"
+                type="month"
+                value={historyMonth}
+                onChange={(e) => {
+                  setHistoryMonth(e.target.value);
+                  setHistoryPage(1);
+                }}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="history-status" className="text-sm font-medium text-slate-700">
+                Status:
+              </label>
+              <select
+                id="history-status"
+                value={historyStatus}
+                onChange={(e) => {
+                  setHistoryStatus(e.target.value);
+                  setHistoryPage(1);
+                }}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+              >
+                <option value="">All statuses</option>
+                <option value="Present">Present</option>
+                <option value="Absent">Absent</option>
+                <option value="Half Day">Half Day</option>
+                <option value="Leave">Leave</option>
+                <option value="Holiday">Holiday</option>
+              </select>
+            </div>
+            {!isSelfScoped && (
+              <EmployeePicker
+                id="history-employee-picker"
+                label="Employee:"
+                value={historyEmployeeId}
+                onChange={(v) => {
+                  setHistoryEmployeeId(v);
+                  setHistoryPage(1);
+                }}
+                options={roster}
+                allowAll
+              />
+            )}
+          </div>
+
+          {historyQuery.isPending ? (
+            <LoadingState label="Loading attendance history..." />
+          ) : historyQuery.isError ? (
+            <ErrorState error={historyQuery.error} onRetry={() => void historyQuery.refetch()} />
+          ) : historyQuery.data.data.length === 0 ? (
+            <EmptyState
+              title="No attendance records match these filters"
+              hint="Adjust the month, status or employee filter and try again."
+            />
+          ) : (
+            <>
+              <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50 text-slate-700">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-medium">Date</th>
+                      {showEmployeeColumn && (
+                        <th className="px-4 py-3 text-left font-medium">Employee</th>
+                      )}
+                      <th className="px-4 py-3 text-left font-medium">Status</th>
+                      <th className="px-4 py-3 text-left font-medium">Work Mode</th>
+                      <th className="px-4 py-3 text-left font-medium">Check In</th>
+                      <th className="px-4 py-3 text-left font-medium">Check Out</th>
+                      <th className="px-4 py-3 text-left font-medium">Source</th>
+                      <th className="px-4 py-3 text-left font-medium">Note</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {historyRows.map((row) => (
+                      <tr key={row.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 font-medium text-slate-900">{row.date}</td>
+                        {showEmployeeColumn && (
+                          <td className="px-4 py-3 text-slate-700">
+                            {row.employeeId
+                              ? `${row.employeeId.firstName} ${row.employeeId.lastName}`
+                              : '—'}
+                            <span className="block text-xs text-slate-500">
+                              {row.employeeId?.employeeCode}
+                            </span>
+                          </td>
+                        )}
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                              STATUS_BADGE_CLASSES[row.status] ?? 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            {row.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">{row.workMode ?? '—'}</td>
+                        <td className="px-4 py-3 text-slate-600">{row.checkIn ?? '—'}</td>
+                        <td className="px-4 py-3 text-slate-600">{row.checkOut ?? '—'}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500">{row.source}</td>
+                        <td className="max-w-xs truncate px-4 py-3 text-slate-600">
+                          {row.note ?? '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Server-side pagination — §10 max limit 100, meta from the API. */}
+              {historyMeta && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm">
+                  <span className="text-slate-600">
+                    {`Page ${historyMeta.page} of ${historyPageCount} · ${historyMeta.total} records`}
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={historyPage <= 1}
+                      onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                      className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      type="button"
+                      disabled={historyPage >= historyPageCount}
+                      onClick={() => setHistoryPage((p) => p + 1)}
+                      className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

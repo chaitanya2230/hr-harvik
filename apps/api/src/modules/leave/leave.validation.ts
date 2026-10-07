@@ -65,3 +65,14 @@ export const reviewLeaveSchema = z
   });
 
 export type ReviewLeaveInput = z.infer<typeof reviewLeaveSchema>;
+
+/** Multipart metadata for `POST /leave/documents` (the file itself is multer). */
+export const uploadLeaveDocumentSchema = z.object({
+  employeeId: z
+    .string()
+    .regex(/^[a-f\d]{24}$/i, 'Must be a valid 24-character id')
+    .optional(),
+  title: z.string().trim().max(200, 'Title must be at most 200 characters').optional(),
+});
+
+export type UploadLeaveDocumentBody = z.infer<typeof uploadLeaveDocumentSchema>;

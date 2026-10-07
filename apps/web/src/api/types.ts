@@ -55,9 +55,10 @@ export interface EmployeeDetail extends EmployeeSummary {
   compensation: { amount?: number; currency?: string; period?: string } | null;
   bankDetails: {
     accountHolder?: string;
+    accountNumber?: string;
     ifscOrRouting?: string;
     bankName?: string;
-    masked: true;
+    masked: boolean;
   } | null;
   statusHistory: Array<{
     status: EmployeeStatus;

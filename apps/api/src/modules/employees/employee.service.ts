@@ -12,6 +12,7 @@ import { Department } from '../departments/department.model';
 import { User } from '../users/user.model';
 import { hashPassword, type AuthAccount } from '../auth/auth.service';
 import { recordAudit } from '../audit/audit.service';
+import { getSettings } from '../settings/settings.service';
 import { collectTeamIds } from './employee.scope';
 import { invalidateDashboardCache } from '../dashboard/dashboard.cache';
 import { initializeEmployeeBalances } from '../leave/leave-balance.service';
@@ -40,14 +41,12 @@ import {
 /** §8.2 — "Joining date cannot be > 1 year in future." */
 const MAX_FUTURE_JOINING_DAYS = 366;
 
-/** §8.2 — "Intern age >= 16. Others age >= 18 unless configurable." */
-const MIN_AGE_BY_TYPE: Record<EmploymentType, number> = {
-  Intern: 16,
-  'Full-Time': 18,
-  Freelancer: 18,
-  Contractor: 18,
-  Other: 18,
-};
+/** §8.2 — "Intern age >= 16. Others age >= 18 unless configurable."
+ *
+ * The live values are configuration, not code: they come from the settings
+ * module (`minAgeIntern` / `minAgeOther`, §6 "system settings"), with 16/18
+ * as the `.env`-era defaults until a settings row exists.
+ */
 
 export interface EmployeeContext {
   account: AuthAccount;
@@ -92,9 +91,11 @@ function assertJoiningDateNotTooFarFuture(dateOfJoining: string): void {
   }
 }
 
-function assertMinimumAge(dob: string | null | undefined, employmentType: EmploymentType, asOf: string): void {
+async function assertMinimumAge(dob: string | null | undefined, employmentType: EmploymentType, asOf: string): Promise<void> {
   if (!dob) return;
-  const minimum = MIN_AGE_BY_TYPE[employmentType];
+  const settings = await getSettings();
+  const minimum =
+    employmentType === 'Intern' ? settings.minAgeIntern : settings.minAgeOther;
   const age = ageOnDate(dob, asOf);
   if (age === null) return;
   if (age < minimum) {
@@ -494,12 +495,18 @@ export async function getEmployeeHistory(id: string) {
 /**
  * §8.2 — "Default Full-Time status is Probation when probation configured".
  *
- * Read as: a Full-Time employee starts on Probation (they have just joined and
- * have not yet cleared probation), everyone else starts Active. An explicit
- * `status` in the body always wins. See docs/DECISIONS.md D-24.
+ * Read as: a Full-Time employee starts on Probation when the settings row
+ * has `probationDefault` enabled (they have just joined and have not yet
+ * cleared probation), everyone else starts Active. An explicit `status` in
+ * the body always wins. See docs/DECISIONS.md D-24; the toggle was added
+ * with the settings module (D-48).
  */
-export function defaultStatusFor(employmentType: EmploymentType): EmployeeStatus {
-  return employmentType === 'Full-Time' ? 'Probation' : 'Active';
+export function defaultStatusFor(
+  employmentType: EmploymentType,
+  probationDefault = true,
+): EmployeeStatus {
+  if (employmentType === 'Full-Time' && probationDefault) return 'Probation';
+  return 'Active';
 }
 
 export async function createEmployee(body: CreateEmployeeBody, ctx: EmployeeContext): Promise<EmployeeView> {
@@ -508,18 +515,25 @@ export async function createEmployee(body: CreateEmployeeBody, ctx: EmployeeCont
   await assertEmailAvailable(email);
   await assertDepartmentExists(body.departmentId);
   assertJoiningDateNotTooFarFuture(body.dateOfJoining);
-  assertMinimumAge(body.dob, body.employmentType, body.dateOfJoining);
+  await assertMinimumAge(body.dob, body.employmentType, body.dateOfJoining);
+
+  const settings = await getSettings();
 
   const managerId = idOrNull(body.reportingManagerId ?? undefined);
   await assertManagerIsAssignable(null, managerId);
 
-  if (body.status && !STATUS_TRANSITIONS[defaultStatusFor(body.employmentType)].includes(body.status)) {
+  if (
+    body.status &&
+    !STATUS_TRANSITIONS[defaultStatusFor(body.employmentType, settings.probationDefault)].includes(
+      body.status,
+    )
+  ) {
     throw unprocessable(
       `A new ${body.employmentType} employee cannot start with status "${body.status}"`,
     );
   }
 
-  const status = body.status ?? defaultStatusFor(body.employmentType);
+  const status = body.status ?? defaultStatusFor(body.employmentType, settings.probationDefault);
 
   // §7 — human-readable id, allocated atomically through the counters collection.
   const employeeCode = await nextHumanId('employee');
@@ -701,7 +715,7 @@ export async function updateEmployee(
     const nextType = body.employmentType as EmploymentType;
     if (!EMPLOYMENT_TYPES.includes(nextType)) throw unprocessable('Unknown employment type');
 
-    assertMinimumAge(
+    await assertMinimumAge(
       existing.dob,
       nextType,
       body.dateOfJoining ?? existing.dateOfJoining,

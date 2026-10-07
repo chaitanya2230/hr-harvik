@@ -1,5 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../features/auth/auth-context';
+import { NotificationBell } from '../features/notifications/NotificationBell';
+import { GlobalEmployeeSearch } from './GlobalEmployeeSearch';
 
 /**
  * AGENTS.md §9 — application shell: left sidebar, top bar, role-filtered
@@ -11,6 +13,8 @@ interface NavItem {
   label: string;
   /** Advisory permission; absent means every signed-in role sees it. */
   permission?: string;
+  /** Advisory role allow-list; absent means all roles. Backend stays authoritative. */
+  roles?: string[];
   end?: boolean;
 }
 
@@ -26,6 +30,9 @@ const NAV: NavItem[] = [
   { to: '/assets', label: 'Assets' },
   { to: '/licenses', label: 'Licenses' },
   { to: '/exit', label: 'Exit / Offboarding' },
+  { to: '/reports', label: 'Reports', roles: ['HR Admin', 'HR Manager', 'Manager'] },
+  { to: '/notifications', label: 'Notifications' },
+  { to: '/settings', label: 'Settings', permission: 'manageSettings' },
   { to: '/me', label: 'My Profile' },
 ];
 
@@ -39,7 +46,9 @@ export function Layout() {
   const navigate = useNavigate();
 
   const visible = NAV.filter(
-    (item) => !item.permission || account?.permissions.includes(item.permission),
+    (item) =>
+      (!item.permission || account?.permissions.includes(item.permission)) &&
+      (!item.roles || (account?.role && item.roles.includes(account.role))),
   );
 
   const onSignOut = async (): Promise<void> => {
@@ -68,13 +77,17 @@ export function Layout() {
           <p className="truncate text-sm text-slate-600">
             Signed in as <span className="font-medium text-slate-900">{account?.email}</span>
           </p>
-          <button
-            type="button"
-            onClick={() => void onSignOut()}
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100"
-          >
-            Sign out
-          </button>
+          <GlobalEmployeeSearch />
+          <div className="flex items-center gap-2">
+            <NotificationBell />
+            <button
+              type="button"
+              onClick={() => void onSignOut()}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100"
+            >
+              Sign out
+            </button>
+          </div>
         </header>
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">

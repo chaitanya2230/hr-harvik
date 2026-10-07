@@ -7,8 +7,47 @@ import {
   createLeaveTypeSchema,
   reviewLeaveSchema,
   updateLeaveTypeSchema,
+  uploadLeaveDocumentSchema,
 } from './leave.validation';
 import { badRequest } from '../../utils/errors';
+
+/**
+ * POST /api/v1/leave/documents — multipart supporting-document upload for a
+ * leave application (AGENTS.md §8.6, §8.7). Stores through the secure
+ * document pipeline and returns the `documentId` to pass when applying.
+ */
+export async function uploadLeaveDocumentHandler(req: Request, res: Response): Promise<void> {
+  if (!req.file) {
+    throw badRequest('File is required for upload');
+  }
+
+  const body = uploadLeaveDocumentSchema.parse(req.body);
+  const doc = await leaveService.uploadLeaveDocument(
+    {
+      employeeId: body.employeeId,
+      title: body.title,
+      fileBuffer: req.file.buffer,
+      originalName: req.file.originalname,
+      mimeType: req.file.mimetype,
+    },
+    req.user!,
+    {
+      ip: req.ip ?? null,
+      requestId: (req.headers['x-request-id'] as string) || null,
+    },
+  );
+
+  res.status(201).json({
+    data: {
+      documentId: String(doc._id),
+      title: doc.title,
+      employeeId: String(doc.employeeId),
+      originalName: doc.file.originalName,
+      mimeType: doc.file.mimeType,
+      size: doc.file.size,
+    },
+  });
+}
 
 export async function listLeaveTypesHandler(_req: Request, res: Response): Promise<void> {
   const result = await leaveTypeService.listLeaveTypes();

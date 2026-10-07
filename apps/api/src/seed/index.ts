@@ -1,4 +1,5 @@
 import type { Types } from 'mongoose';
+import type { CandidateStage } from '../config/constants';
 import { connectMongo, disconnectMongo } from '../db/mongo';
 import { logger } from '../utils/logger';
 import { Counter } from '../modules/counters/counter.model';
@@ -682,9 +683,14 @@ async function seedP6Fixtures(
       };
     });
 
-    const stageHistory = [
+    const stageHistory: Array<{
+      stage: CandidateStage;
+      changedAt: Date;
+      changedBy: null;
+      note: string;
+    }> = [
       {
-        stage: 'Applied' as const,
+        stage: 'Applied',
         changedAt: new Date('2026-01-20T10:00:00.000Z'),
         changedBy: null,
         note: `Application received via ${seedCand.source}`,
@@ -692,7 +698,7 @@ async function seedP6Fixtures(
     ];
     if (seedCand.stage !== 'Applied') {
       stageHistory.push({
-        stage: seedCand.stage as any,
+        stage: seedCand.stage,
         changedAt: new Date('2026-02-01T10:00:00.000Z'),
         changedBy: null,
         note: `Moved to ${seedCand.stage}`,

@@ -12,6 +12,10 @@ import attendanceRouter from '../modules/attendance/attendance.routes';
 import leaveRouter from '../modules/leave/leave.routes';
 import { recruitmentRouter } from '../modules/recruitment/recruitment.routes';
 import { onboardingRouter } from '../modules/onboarding/onboarding.routes';
+import { reportRouter } from '../modules/reports/report.routes';
+import { notificationRouter } from '../modules/notifications/notification.routes';
+import { settingsRouter } from '../modules/settings/settings.routes';
+import { userRouter } from '../modules/users/user.routes';
 
 /**
  * AGENTS.md §10 — every endpoint lives under the `/api/v1` prefix.
@@ -23,8 +27,9 @@ import { onboardingRouter } from '../modules/onboarding/onboarding.routes';
  *   P3 exit
  *   P4 documents
  *   P5 attendance, leave
- *   P6 recruitment, onboarding                    <- registered
- *   P7 reports, notifications
+ *   P6 recruitment, onboarding
+ *   P7 reports, notifications                    <- registered
+ *   P7 settings, users (AGENTS §6/§9 requirement gaps) <- registered
  */
 export const apiRouter = Router();
 
@@ -42,4 +47,9 @@ apiRouter.use('/attendance', attendanceRouter);
 apiRouter.use('/leave', leaveRouter);
 apiRouter.use('/recruitment', recruitmentRouter);
 apiRouter.use('/onboarding', onboardingRouter);
+apiRouter.use('/reports', reportRouter);
+apiRouter.use('/notifications', notificationRouter);
+apiRouter.use('/settings', settingsRouter);
+apiRouter.use('/users', userRouter);
+
 

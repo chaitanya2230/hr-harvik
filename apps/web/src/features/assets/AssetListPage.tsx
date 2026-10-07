@@ -38,7 +38,10 @@ export function AssetListPage() {
   const [searchParams] = useSearchParams();
   const canManage = account?.permissions.includes('manageAssets') ?? false;
 
-  const [tab, setTab] = useState<'inventory' | 'assignments'>('inventory');
+  const [tab, setTab] = useState<'inventory' | 'assignments'>(
+    // Deep links (dashboard cards) land on the right tab: /assets?tab=assignments&active=true
+    searchParams.get('tab') === 'assignments' ? 'assignments' : 'inventory',
+  );
   const [page, setPage] = useState(1);
   const [q, setQ] = useState('');
   const [submittedQ, setSubmittedQ] = useState('');

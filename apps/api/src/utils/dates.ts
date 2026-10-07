@@ -1,4 +1,4 @@
-import { env } from '../config/env';
+import { getSettingsSnapshot } from '../modules/settings/settings.service';
 import { badRequest } from './errors';
 
 /**
@@ -22,8 +22,13 @@ export function toDateOnly(value: Date | string | number): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** Today's date-only string in the company timezone (not the server timezone). */
-export function todayInTimeZone(timeZone: string = env.COMPANY_TIMEZONE): string {
+/** Today's date-only string in the company timezone (not the server timezone).
+ *
+ * AGENTS.md §11 — "company timezone comes from settings": the default
+ * timezone is read from the settings module (falling back to `.env`
+ * `COMPANY_TIMEZONE` until the first settings load completes).
+ */
+export function todayInTimeZone(timeZone: string = getSettingsSnapshot().timezone): string {
   try {
     return new Intl.DateTimeFormat('en-CA', {
       timeZone,

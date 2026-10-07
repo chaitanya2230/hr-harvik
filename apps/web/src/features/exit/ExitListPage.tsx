@@ -1,7 +1,10 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { useExitList, type ExitListParams } from './api';
+import { Link, useNavigate } from 'react-router-dom';
+import { ApiError } from '../../api/client';
+import { useEmployeeList } from '../employees/api';
+import { useExitList, useInitiateExit, type ExitListParams } from './api';
 import { useAuth } from '../auth/auth-context';
+import { useToast } from '../../components/Toast';
 import { EmptyState, ErrorState, LoadingState, PageHeader } from '../../components/ui';
 import type { ExitStage } from '../../api/types';
 
@@ -42,11 +45,65 @@ const stageBadgeClass = (stage: ExitStage): string => {
 
 export function ExitListPage() {
   const { account } = useAuth();
+  const notify = useToast();
+  const navigate = useNavigate();
   const [params, setParams] = useState<ExitListParams>({ page: 1, limit: 20 });
 
   const listQuery = useExitList(params);
 
   const canInitiate = account?.permissions.includes('processExit') ?? false;
+
+  // §8.10 — "Process Exit" initiation form (employee + resignation details).
+  const [showInitiate, setShowInitiate] = useState(false);
+  const [initForm, setInitForm] = useState({
+    employeeId: '',
+    reason: '',
+    resignationDate: '',
+    noticePeriodDays: 30,
+    lastWorkingDay: '',
+    reasonNote: '',
+  });
+  const employeesQuery = useEmployeeList({ page: 1, limit: 100 }, showInitiate && canInitiate);
+  const initiateMut = useInitiateExit(initForm.employeeId);
+
+  const resetInitForm = () => {
+    setInitForm({
+      employeeId: '',
+      reason: '',
+      resignationDate: '',
+      noticePeriodDays: 30,
+      lastWorkingDay: '',
+      reasonNote: '',
+    });
+  };
+
+  const handleInitiateSubmit = async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault();
+    if (!initForm.employeeId) {
+      notify('error', 'Select an employee');
+      return;
+    }
+    if (!initForm.reason.trim()) {
+      notify('error', 'Reason is required');
+      return;
+    }
+    try {
+      await initiateMut.mutateAsync({
+        reason: initForm.reason.trim(),
+        noticePeriodDays: Number(initForm.noticePeriodDays) || 0,
+        ...(initForm.resignationDate ? { resignationDate: initForm.resignationDate } : {}),
+        ...(initForm.lastWorkingDay ? { lastWorkingDay: initForm.lastWorkingDay } : {}),
+        ...(initForm.reasonNote.trim() ? { reasonNote: initForm.reasonNote.trim() } : {}),
+      });
+      notify('success', 'Exit process started');
+      const employeeId = initForm.employeeId;
+      resetInitForm();
+      setShowInitiate(false);
+      navigate(`/exit/${employeeId}`);
+    } catch (caught) {
+      notify('error', caught instanceof ApiError ? caught.message : 'Failed to start exit');
+    }
+  };
 
   const onStageFilter = (stage: string) => {
     setParams((prev) => ({ ...prev, stage: stage || undefined, page: 1 }));
@@ -59,12 +116,13 @@ export function ExitListPage() {
         subtitle="Active and completed employee exit processes"
         actions={
           canInitiate ? (
-            <Link
-              to="/employees"
+            <button
+              type="button"
+              onClick={() => setShowInitiate(true)}
               className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
             >
-              Go to Employee to Initiate
-            </Link>
+              Process Exit
+            </button>
           ) : null
         }
       />
@@ -179,6 +237,154 @@ export function ExitListPage() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Process Exit initiation modal (§8.10) */}
+      {showInitiate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">Process Exit</h2>
+            <form onSubmit={(event) => void handleInitiateSubmit(event)} className="space-y-4">
+              <div>
+                <label htmlFor="exit-employee" className="block text-xs font-medium text-slate-700 mb-1">
+                  Employee *
+                </label>
+                <select
+                  id="exit-employee"
+                  required
+                  value={initForm.employeeId}
+                  onChange={(event) =>
+                    setInitForm({ ...initForm, employeeId: event.target.value })
+                  }
+                  className="w-full rounded border border-slate-300 p-2 text-sm"
+                >
+                  <option value="">Select an employee…</option>
+                  {employeesQuery.data?.data.map((employee) => (
+                    <option key={employee.id} value={employee.id}>
+                      {employee.fullName} ({employee.employeeCode}) — {employee.status}
+                    </option>
+                  ))}
+                </select>
+                {employeesQuery.isError ? (
+                  <p className="mt-1 text-xs text-rose-600" role="alert">
+                    Employee list could not be loaded.
+                  </p>
+                ) : null}
+              </div>
+              <div>
+                <label htmlFor="exit-reason" className="block text-xs font-medium text-slate-700 mb-1">
+                  Reason *
+                </label>
+                <input
+                  id="exit-reason"
+                  required
+                  maxLength={200}
+                  value={initForm.reason}
+                  onChange={(event) => setInitForm({ ...initForm, reason: event.target.value })}
+                  placeholder="Resignation, termination, relocation…"
+                  className="w-full rounded border border-slate-300 p-2 text-sm"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label
+                    htmlFor="exit-resignation-date"
+                    className="block text-xs font-medium text-slate-700 mb-1"
+                  >
+                    Resignation date
+                  </label>
+                  <input
+                    id="exit-resignation-date"
+                    type="date"
+                    value={initForm.resignationDate}
+                    onChange={(event) =>
+                      setInitForm({ ...initForm, resignationDate: event.target.value })
+                    }
+                    className="w-full rounded border border-slate-300 p-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="exit-notice-period"
+                    className="block text-xs font-medium text-slate-700 mb-1"
+                  >
+                    Notice period (days)
+                  </label>
+                  <input
+                    id="exit-notice-period"
+                    type="number"
+                    min={0}
+                    max={365}
+                    value={initForm.noticePeriodDays}
+                    onChange={(event) =>
+                      setInitForm({ ...initForm, noticePeriodDays: Number(event.target.value) })
+                    }
+                    className="w-full rounded border border-slate-300 p-2 text-sm"
+                  />
+                </div>
+              </div>
+              <div>
+                <label
+                  htmlFor="exit-lwd"
+                  className="block text-xs font-medium text-slate-700 mb-1"
+                >
+                  Last working day
+                </label>
+                <input
+                  id="exit-lwd"
+                  type="date"
+                  value={initForm.lastWorkingDay}
+                  onChange={(event) =>
+                    setInitForm({ ...initForm, lastWorkingDay: event.target.value })
+                  }
+                  className="w-full rounded border border-slate-300 p-2 text-sm"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Leave blank to let the server calculate it from the resignation date and notice
+                  period.
+                </p>
+              </div>
+              <div>
+                <label
+                  htmlFor="exit-reason-note"
+                  className="block text-xs font-medium text-slate-700 mb-1"
+                >
+                  Notes
+                </label>
+                <textarea
+                  id="exit-reason-note"
+                  rows={3}
+                  maxLength={1000}
+                  value={initForm.reasonNote}
+                  onChange={(event) =>
+                    setInitForm({ ...initForm, reasonNote: event.target.value })
+                  }
+                  placeholder="Optional context…"
+                  className="w-full rounded border border-slate-300 p-2 text-sm"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetInitForm();
+                    setShowInitiate(false);
+                  }}
+                  className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={initiateMut.isPending}
+                  className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+                >
+                  {initiateMut.isPending ? 'Starting…' : 'Start Exit Process'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

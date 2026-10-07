@@ -4,7 +4,7 @@ import type { LeaveBalanceDoc } from './leave-balance.schema';
 import { LeaveType } from './leave-type.model';
 import { Holiday } from '../attendance/holiday.model';
 import { collectTeamIds, isValidScopeId } from '../employees/employee.scope';
-import { eachDayInclusive, isWeekend } from '../../utils/dates';
+import { eachDayInclusive, isWeekend, todayInTimeZone } from '../../utils/dates';
 import { trustedFilter } from '../../utils/mongo';
 import type { AuthAccount } from '../auth/auth.service';
 import type { EmploymentType } from '../../config/constants';
@@ -142,6 +142,38 @@ export async function rolloverYear(
   }
 
   return rolledBalances;
+}
+
+/**
+ * AGENTS.md §8.12 / §14 — operational year rollover, invoked from the daily
+ * worker heartbeat. Idempotent by construction: only employees that have
+ * balances for the previous year and no rows yet for the current year are
+ * rolled, so a rerun never clobbers allocations or `used`/`pending` that were
+ * recorded after the initial rollover. Employees hired mid-year receive their
+ * current-year balances at creation time and are skipped here.
+ */
+export async function runScheduledYearRollover(): Promise<{ year: number; employees: number }> {
+  const toYear = parseInt(todayInTimeZone().slice(0, 4), 10);
+  const fromYear = toYear - 1;
+
+  const employeesWithPast = await LeaveBalance.distinct('employeeId', {
+    year: fromYear,
+    isDeleted: false,
+  });
+
+  let rolled = 0;
+  for (const employeeId of employeesWithPast) {
+    const hasCurrent = await LeaveBalance.exists({
+      employeeId,
+      year: toYear,
+      isDeleted: false,
+    });
+    if (hasCurrent) continue;
+    await rolloverYear(String(employeeId), fromYear, toYear);
+    rolled += 1;
+  }
+
+  return { year: toYear, employees: rolled };
 }
 
 export async function listBalances(

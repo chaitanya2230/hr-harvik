@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ApiError, SessionExpiredError, setAccessToken } from '../../api/client';
+import { ApiError, SessionExpiredError, onSessionExpired, setAccessToken } from '../../api/client';
 import { AuthContext, type AuthContextValue } from './auth-context';
 import { loginRequest, logoutRequest, meRequest } from './api';
 import type { AuthAccount } from './api';
@@ -38,6 +38,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    // AGENTS.md §6/§11 — a failed refresh means the session is gone: drop the
+    // account so RequireAuth redirects to /login (AGENTS.md §9) and clear
+    // cached server data exactly like signOut does. logoutRequest is
+    // deliberately not called: the refresh cookie may already be invalid, so
+    // the server would just 401 again. Safe during the initial `meRequest`
+    // probe too — that probe catches SessionExpiredError and leaves the
+    // account null anyway, so no loop can start.
+    return onSessionExpired(() => {
+      setAccount(null);
+      setAccessToken(null);
+      queryClient.clear();
+    });
+  }, [queryClient]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     const me = await loginRequest(email, password);

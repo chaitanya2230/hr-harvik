@@ -117,7 +117,7 @@ export const EMPLOYEES: readonly SeedEmployee[] = [
     dateOfJoining: '2025-09-01',
     probationEndDate: '2026-03-01',
     status: 'Probation',
-    managerKey: 'rahul',
+    managerKey: 'ananya',
     compensation: { amount: 72000, currency: 'INR', period: 'monthly' },
   },
   {

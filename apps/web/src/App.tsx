@@ -10,6 +10,7 @@ import { EmployeeEditPage } from './features/employees/EmployeeEditPage';
 import { EmployeeForm } from './features/employees/EmployeeForm';
 import { EmployeeListPage } from './features/employees/EmployeeListPage';
 import { MyProfilePage } from './features/employees/MyProfilePage';
+import { SettingsPage } from './features/settings/SettingsPage';
 import { AssetDetailPage } from './features/assets/AssetDetailPage';
 import { AssetEditPage } from './features/assets/AssetEditPage';
 import { AssetForm } from './features/assets/AssetForm';
@@ -31,6 +32,8 @@ import { CandidateDetailPage } from './features/recruitment/CandidateDetailPage'
 import { CandidateForm } from './features/recruitment/CandidateForm';
 import { OnboardingListPage } from './features/onboarding/OnboardingListPage';
 import { OnboardingDetailPage } from './features/onboarding/OnboardingDetailPage';
+import { ReportsPage } from './features/reports/ReportsPage';
+import { NotificationsPage } from './features/notifications/NotificationsPage';
 
 /**
  * AGENTS.md §9 — P1 routes.
@@ -221,6 +224,24 @@ export function App() {
             {/* P6 — Onboarding (AGENTS.md §8.4, §9) */}
             <Route path="onboarding" element={<OnboardingListPage />} />
             <Route path="onboarding/:employeeId" element={<OnboardingDetailPage />} />
+
+            {/* P7 — Reports & Notifications (AGENTS.md §8.11, §8.12, §9).
+                Reports relies on backend per-report RBAC (cost is HR-only);
+                the nav hides it from Employees, who are refused everywhere. */}
+            <Route path="reports" element={<ReportsPage />} />
+            <Route path="notifications" element={<NotificationsPage />} />
+
+            {/* §9 `/settings` — system settings + user/role management are an
+                HR Admin console (§6); writes re-check `manageSettings` /
+                `manageUsers` on the backend regardless. */}
+            <Route
+              path="settings"
+              element={
+                <RequirePermission permission="manageSettings">
+                  <SettingsPage />
+                </RequirePermission>
+              }
+            />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

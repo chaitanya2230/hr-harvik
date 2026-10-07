@@ -104,6 +104,11 @@ export const generateDocumentSchema = z.object({
   employeeId: objectIdSchema,
   title: z.string().trim().min(1).max(200).optional(),
   confidential: booleanCoerce.optional().default(false),
+  /**
+   * §3 — `queued` runs the PDF on the BullMQ `pdf-generation` queue and
+   * returns `202 { jobId }` for polling; the default stays synchronous.
+   */
+  mode: z.enum(['sync', 'queued']).optional().default('sync'),
 });
 
 export type GenerateDocumentBody = z.infer<typeof generateDocumentSchema>;

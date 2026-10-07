@@ -84,6 +84,56 @@ describe('AGENTS.md §14 — LEAVE ACCEPTANCE TESTS', () => {
     });
   });
 
+  it('duplicate leave type code is rejected with 409', async () => {
+    const res = await request(app)
+      .post('/api/v1/leave/types')
+      .set(...authAs.admin())
+      .send({
+        name: 'Duplicate Casual',
+        code: 'casual',
+        annualAllocation: 5,
+        isPaid: true,
+      });
+
+    expect(res.status).toBe(409);
+  });
+
+  it('leave type supports partial updates while preserving untouched fields', async () => {
+    const created = await request(app)
+      .post('/api/v1/leave/types')
+      .set(...authAs.admin())
+      .send({
+        name: 'Study Leave',
+        code: `STUDY${Date.now().toString().slice(-4)}`,
+        annualAllocation: 5,
+        carryForward: true,
+        isPaid: false,
+      });
+    expect(created.status).toBe(201);
+    const id = created.body.data._id as string;
+
+    const res = await request(app)
+      .patch(`/api/v1/leave/types/${id}`)
+      .set(...authAs.admin())
+      .send({ annualAllocation: 7, isPaid: true, requiresDocument: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.annualAllocation).toBe(7);
+    expect(res.body.data.isPaid).toBe(true);
+    expect(res.body.data.requiresDocument).toBe(true);
+    expect(res.body.data.name).toBe('Study Leave'); // untouched field preserved
+    expect(res.body.data.code).toBe(created.body.data.code);
+  });
+
+  it('updating a missing leave type returns 404', async () => {
+    const res = await request(app)
+      .patch('/api/v1/leave/types/000000000000000000000000')
+      .set(...authAs.admin())
+      .send({ annualAllocation: 7 });
+
+    expect(res.status).toBe(404);
+  });
+
   it('valid application — creates pending leave request and increments pending balance', async () => {
     const empId = await employeeIdByEmail(SEEDED.softwareEngineer);
     const lt = await LeaveType.findOne({ code: 'CASUAL', isDeleted: false });

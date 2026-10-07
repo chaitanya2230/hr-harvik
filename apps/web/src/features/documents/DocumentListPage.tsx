@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../auth/auth-context';
 import { useToast } from '../../components/Toast';
 import { Card, EmptyState, ErrorState, LoadingState, PageHeader } from '../../components/ui';
 import {
+  documentKeys,
   downloadDocument,
   useCreateDocumentTemplate,
   useDeleteDocument,
@@ -11,6 +13,7 @@ import {
   useDocuments,
   useDocumentTemplates,
   useGenerateDocument,
+  usePdfGenerateJob,
   usePreviewTemplate,
   useUpdateDocumentTemplate,
   useUploadDocument,
@@ -43,6 +46,7 @@ export function DocumentListPage() {
   const [activeTab, setActiveTab] = useState<'documents' | 'templates'>('documents');
   const [page, setPage] = useState(1);
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [employeeFilter, setEmployeeFilter] = useState('');
   const [search, setSearch] = useState('');
 
   // Modals state
@@ -57,11 +61,15 @@ export function DocumentListPage() {
     page,
     limit: 20,
     category: categoryFilter || undefined,
+    employeeId: employeeFilter || undefined,
     search: search || undefined,
   });
 
   const templatesQuery = useDocumentTemplates(undefined, activeTab === 'templates' || generateModalOpen);
-  const employeesQuery = useEmployeeList({ page: 1, limit: 100 }, uploadModalOpen || generateModalOpen);
+  const employeesQuery = useEmployeeList(
+    { page: 1, limit: 100 },
+    uploadModalOpen || generateModalOpen || isHr,
+  );
 
   // Mutations
   const uploadDocMut = useUploadDocument();
@@ -72,6 +80,24 @@ export function DocumentListPage() {
   const deleteTplMut = useDeleteDocumentTemplate();
   const previewTplMut = usePreviewTemplate();
   const generateDocMut = useGenerateDocument();
+
+  // §3 — queued PDF generation: poll the job started from the Generate modal.
+  const [pdfJobId, setPdfJobId] = useState<string | null>(null);
+  const pdfJobQuery = usePdfGenerateJob(pdfJobId);
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const status = pdfJobQuery.data?.status;
+    if (!pdfJobId || !status) return;
+    if (status === 'completed') {
+      notify('success', 'Queued PDF generated and saved to Documents');
+      setPdfJobId(null);
+      void queryClient.invalidateQueries({ queryKey: documentKeys.all });
+    } else if (status === 'failed') {
+      notify('error', pdfJobQuery.data?.error || 'Queued PDF generation failed');
+      setPdfJobId(null);
+    }
+  }, [pdfJobQuery.data, pdfJobId, notify, queryClient]);
 
   // Handlers
   const handleDownload = async (doc: DocumentItem) => {
@@ -167,7 +193,10 @@ export function DocumentListPage() {
               />
               <select
                 value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
+                onChange={(e) => {
+                  setCategoryFilter(e.target.value);
+                  setPage(1);
+                }}
                 className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
               >
                 <option value="">All Categories</option>
@@ -177,11 +206,59 @@ export function DocumentListPage() {
                   </option>
                 ))}
               </select>
+              {isHr && (
+                <>
+                  <label htmlFor="doc-employee-filter" className="sr-only">
+                    Filter by employee
+                  </label>
+                  <select
+                    id="doc-employee-filter"
+                    value={employeeFilter}
+                    onChange={(e) => {
+                      setEmployeeFilter(e.target.value);
+                      setPage(1);
+                    }}
+                    className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+                  >
+                    <option value="">All employees</option>
+                    {employeesQuery.data?.data.map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.fullName} ({emp.employeeCode})
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
+              {(search || categoryFilter || employeeFilter) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch('');
+                    setCategoryFilter('');
+                    setEmployeeFilter('');
+                    setPage(1);
+                  }}
+                  className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100"
+                >
+                  Clear
+                </button>
+              )}
             </div>
             <p className="text-xs text-slate-500">
               Total: {docsQuery.data?.meta.total ?? 0} documents
             </p>
           </div>
+
+          {/* §3 — background (queued) generation progress */}
+          {pdfJobId ? (
+            <div
+              role="status"
+              className="flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-800"
+            >
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-brand-600" />
+              Generating PDF in the background — it will appear in the list automatically.
+            </div>
+          ) : null}
 
           {docsQuery.isLoading ? (
             <LoadingState label="Loading documents…" />
@@ -190,7 +267,11 @@ export function DocumentListPage() {
           ) : docsQuery.data?.data.length === 0 ? (
             <EmptyState
               title="No documents found"
-              hint={search || categoryFilter ? 'Try clearing your filters.' : 'Upload or generate a document to get started.'}
+              hint={
+                search || categoryFilter || employeeFilter
+                  ? 'Try clearing your filters.'
+                  : 'Upload or generate a document to get started.'
+              }
             />
           ) : (
             <Card>
@@ -469,10 +550,21 @@ export function DocumentListPage() {
           templates={templatesQuery.data?.data || []}
           employees={employeesQuery.data?.data || []}
           onPreview={(id, employeeId) => previewTplMut.mutateAsync({ id, employeeId })}
-          onGenerate={async (templateId, employeeId, title, confidential) => {
+          onGenerate={async (templateId, employeeId, title, confidential, queued) => {
             try {
-              await generateDocMut.mutateAsync({ templateId, employeeId, title, confidential });
-              notify('success', 'Document generated successfully');
+              const result = await generateDocMut.mutateAsync({
+                templateId,
+                employeeId,
+                title,
+                confidential,
+                ...(queued ? { mode: 'queued' as const } : {}),
+              });
+              if (result.queued) {
+                setPdfJobId(result.queued.jobId);
+                notify('success', 'PDF generation queued — you will be notified when it finishes');
+              } else {
+                notify('success', 'Document generated successfully');
+              }
               setGenerateModalOpen(false);
             } catch (err: unknown) {
               notify('error', err instanceof Error ? err.message : 'Generation failed');
@@ -817,13 +909,20 @@ function GenerateModal({
   templates: DocumentTemplateItem[];
   employees: Array<{ id: string; fullName: string; employeeCode: string; employmentType: string; status: string }>;
   onPreview: (templateId: string, employeeId: string) => Promise<{ data: { renderedHtml: string } }>;
-  onGenerate: (templateId: string, employeeId: string, title?: string, confidential?: boolean) => Promise<void>;
+  onGenerate: (
+    templateId: string,
+    employeeId: string,
+    title?: string,
+    confidential?: boolean,
+    queued?: boolean,
+  ) => Promise<void>;
   isGenerating: boolean;
 }) {
   const [templateId, setTemplateId] = useState('');
   const [employeeId, setEmployeeId] = useState('');
   const [customTitle, setCustomTitle] = useState('');
   const [confidential, setConfidential] = useState(false);
+  const [queuedMode, setQueuedMode] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -849,7 +948,7 @@ function GenerateModal({
   const handleGenerate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!templateId || !employeeId) return;
-    void onGenerate(templateId, employeeId, customTitle || undefined, confidential);
+    void onGenerate(templateId, employeeId, customTitle || undefined, confidential, queuedMode);
   };
 
   return (
@@ -912,17 +1011,35 @@ function GenerateModal({
           </div>
 
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="gen-confidential"
-                checked={confidential}
-                onChange={(e) => setConfidential(e.target.checked)}
-                className="rounded border-slate-300 text-brand-600"
-              />
-              <label htmlFor="gen-confidential" className="text-xs text-slate-700">
-                Mark as confidential
-              </label>
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="gen-confidential"
+                  checked={confidential}
+                  onChange={(e) => setConfidential(e.target.checked)}
+                  className="rounded border-slate-300 text-brand-600"
+                />
+                <label htmlFor="gen-confidential" className="text-xs text-slate-700">
+                  Mark as confidential
+                </label>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="gen-queued"
+                  checked={queuedMode}
+                  onChange={(e) => setQueuedMode(e.target.checked)}
+                  className="rounded border-slate-300 text-brand-600"
+                />
+                <label
+                  htmlFor="gen-queued"
+                  className="text-xs text-slate-700"
+                  title="Run generation on the background queue (§3 — BullMQ); the document appears when it finishes"
+                >
+                  Run in background
+                </label>
+              </div>
             </div>
 
             <button

@@ -5,6 +5,9 @@ import { LeaveBalance } from './leave-balance.model';
 import { LeaveType } from './leave-type.model';
 import { Employee } from '../employees/employee.model';
 import { Attendance } from '../attendance/attendance.model';
+import { Document } from '../documents/document.model';
+import type { DocumentDoc } from '../documents/document.schema';
+import * as documentService from '../documents/document.service';
 import { calculateWorkingDays } from './leave-balance.service';
 import { collectTeamIds, isValidScopeId } from '../employees/employee.scope';
 import { recordAudit } from '../audit/audit.service';
@@ -14,6 +17,58 @@ import { todayInTimeZone } from '../../utils/dates';
 import { trustedFilter } from '../../utils/mongo';
 import type { AuthAccount } from '../auth/auth.service';
 import type { ApplyLeaveInput, ReviewLeaveInput } from './leave.validation';
+import { notifyLeaveEvent } from '../notifications/reminder.service';
+import { logger } from '../../utils/logger';
+
+export interface UploadLeaveDocumentInput {
+  employeeId?: string;
+  title?: string;
+  fileBuffer: Buffer;
+  originalName: string;
+  mimeType: string;
+}
+
+/**
+ * AGENTS.md §8.6 / §8.7 — leave supporting-document upload.
+ *
+ * Reuses the secure document architecture: MIME + magic-byte validation,
+ * size limit, random server-side filename, no public static serving, and a
+ * `Document` record (category "Other") whose id can be passed as
+ * `documentId` when applying for a leave type with `requiresDocument`.
+ *
+ * Employees may upload only for themselves; HR may upload on behalf of an
+ * employee (e.g. a scanned medical certificate handed to HR).
+ */
+export async function uploadLeaveDocument(
+  input: UploadLeaveDocumentInput,
+  actor: AuthAccount,
+  ctx: { ip: string | null; requestId: string | null },
+): Promise<DocumentDoc> {
+  const isHr = actor.role === 'HR Admin' || actor.role === 'HR Manager';
+  const targetEmployeeId = input.employeeId ?? actor.employeeId;
+  if (!targetEmployeeId) {
+    throw badRequest('Employee ID is required');
+  }
+
+  const isSelf = Boolean(actor.employeeId) && actor.employeeId === targetEmployeeId;
+  if (!isSelf && !isHr) {
+    throw forbidden('You can only upload a supporting document for yourself');
+  }
+
+  return documentService.uploadDocument(
+    {
+      employeeId: targetEmployeeId,
+      category: 'Other',
+      title: input.title?.trim() || `Leave supporting document — ${input.originalName}`,
+      fileBuffer: input.fileBuffer,
+      originalName: input.originalName,
+      mimeType: input.mimeType,
+      // The approver (Manager/HR) must be able to open the proof.
+      confidential: false,
+    },
+    { account: actor, ip: ctx.ip, requestId: ctx.requestId },
+  );
+}
 
 export async function applyLeave(
   input: ApplyLeaveInput,
@@ -62,6 +117,24 @@ export async function applyLeave(
   // AGENTS.md §14 LEV — required sick/medical document enforced
   if (leaveType.requiresDocument && !input.documentId) {
     throw unprocessable('Medical/document proof is required for this leave type');
+  }
+
+  // The referenced proof must exist and belong to the employee applying —
+  // otherwise anyone could attach another employee's document as "proof".
+  if (input.documentId) {
+    if (!Types.ObjectId.isValid(input.documentId)) {
+      throw unprocessable('Supporting document not found');
+    }
+    const proof = await Document.findOne({
+      _id: new Types.ObjectId(input.documentId),
+      isDeleted: false,
+    });
+    if (!proof) {
+      throw unprocessable('Supporting document not found');
+    }
+    if (String(proof.employeeId) !== String(targetEmployeeId)) {
+      throw unprocessable('Supporting document belongs to a different employee');
+    }
   }
 
   // The overlap check, balance claim and insert run inside one transaction
@@ -163,6 +236,21 @@ export async function applyLeave(
   });
 
   await invalidateDashboardCache();
+
+  // Awaited (not fire-and-forget): the in-app notification row must exist
+  // when the response commits (§14 NOT-09). Only the SMTP send stays async
+  // inside createNotification. Failures here must never fail the leave itself.
+  try {
+    await notifyLeaveEvent({
+      leaveRequestId: leaveRequest._id,
+      employeeId: leaveRequest.employeeId,
+      eventType: 'applied',
+      datesDescription: `${leaveRequest.fromDate} to ${leaveRequest.toDate}`,
+    });
+  } catch (err) {
+    logger.error({ err }, 'Failed to trigger leave notification');
+  }
+
   return leaveRequest;
 }
 
@@ -275,6 +363,18 @@ export async function reviewLeave(
   });
 
   await invalidateDashboardCache();
+
+  try {
+    await notifyLeaveEvent({
+      leaveRequestId: claimed._id,
+      employeeId: claimed.employeeId,
+      eventType: input.status === 'Approved' ? 'approved' : 'rejected',
+      datesDescription: `${claimed.fromDate} to ${claimed.toDate}`,
+    });
+  } catch (err) {
+    logger.error({ err }, 'Failed to trigger leave decision notification');
+  }
+
   return claimed;
 }
 

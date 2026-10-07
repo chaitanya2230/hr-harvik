@@ -10,6 +10,7 @@ import {
   generateDocumentHandler,
   getDocumentHandler,
   getDocumentHistoryHandler,
+  getPdfJobHandler,
   getTemplateHandler,
   handleMulterError,
   listDocumentsHandler,
@@ -48,6 +49,9 @@ documentRouter.post(
 );
 
 documentRouter.get('/:id/history', asyncHandler(getDocumentHistoryHandler));
+
+// Queued PDF generation status (§3 — BullMQ pdf-generation queue).
+documentRouter.get('/pdf-jobs/:jobId', asyncHandler(getPdfJobHandler));
 
 documentRouter.delete(
   '/:id',

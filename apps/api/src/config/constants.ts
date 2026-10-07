@@ -288,3 +288,34 @@ export const DASHBOARD_CACHE_TTL_SECONDS = 60;
 /** AGENTS.md §10 — Maximum page size. */
 export const MAX_PAGE_LIMIT = 100;
 export const DEFAULT_PAGE_LIMIT = 20;
+
+/** AGENTS.md §7 & §8.12 — Notification types. */
+export const NOTIFICATION_TYPES = [
+  'joining_reminder',
+  'leaving_reminder',
+  'probation_reminder',
+  'document_expiry',
+  'software_renewal',
+  'asset_return',
+  'overdue_asset',
+  'pending_approval',
+  'leave_status',
+  'general',
+] as const;
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+
+/** AGENTS.md §8.11 — Report types. */
+export const REPORT_TYPES = [
+  'employees',
+  'new-joiners',
+  'exits',
+  'attendance',
+  'leave',
+  'assets',
+  'licenses',
+  'pending-asset-returns',
+  'pending-license-revocations',
+  'cost-summary',
+  'department-counts',
+] as const;
+export type ReportType = (typeof REPORT_TYPES)[number];

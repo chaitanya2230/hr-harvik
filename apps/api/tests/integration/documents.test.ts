@@ -395,6 +395,60 @@ describe('AGENTS.md §14 — DOCUMENTS', () => {
     expect(buffer.subarray(0, 5).toString('ascii')).toBe('%PDF-');
   });
 
+  it('queued generation (mode=queued) returns 202 + jobId and exposes a pollable status; results are ownership-scoped', async () => {
+    const targetEmployeeId = await employeeIdByEmail(SEEDED.softwareEngineer);
+
+    const templateRes = await request(app)
+      .post('/api/v1/document-templates')
+      .set(...authAs.admin())
+      .send({
+        name: `Queued Offer ${Date.now()}`,
+        category: 'Offer Letter',
+        applicableEmploymentTypes: ['Full-Time'],
+        bodyHtml:
+          '<h2>Employment Offer</h2><p>This is to confirm that {{employee.fullName}} is hired as {{employee.designation}}.</p>',
+      });
+
+    const templateId = templateRes.body.data.id;
+
+    const queueRes = await request(app)
+      .post(`/api/v1/document-templates/${templateId}/generate`)
+      .set(...authAs.hrManager())
+      .send({ employeeId: targetEmployeeId, mode: 'queued' });
+
+    expect(queueRes.status).toBe(202);
+    expect(queueRes.body.data.status).toBe('pending');
+    expect(queueRes.body.data.jobId).toBeDefined();
+
+    const jobId = queueRes.body.data.jobId;
+
+    // Job status is pollable; in the test env there may or may not be a live
+    // queue, so the terminal state may already be reached (inline fallback).
+    const statusRes = await request(app)
+      .get(`/api/v1/documents/pdf-jobs/${jobId}`)
+      .set(...authAs.hrManager());
+
+    expect(statusRes.status).toBe(200);
+    expect(['pending', 'completed']).toContain(statusRes.body.data.status);
+    if (statusRes.body.data.status === 'completed') {
+      expect(statusRes.body.data.documentId).toBeDefined();
+    }
+
+    // Ownership is enforced: a different user cannot read someone else's job.
+    const otherUserRes = await request(app)
+      .get(`/api/v1/documents/pdf-jobs/${jobId}`)
+      .set(...authAs.employee());
+
+    expect(otherUserRes.status).toBe(403);
+
+    // Unknown job id → 404.
+    const missingRes = await request(app)
+      .get('/api/v1/documents/pdf-jobs/does-not-exist')
+      .set(...authAs.admin());
+
+    expect(missingRes.status).toBe(404);
+  });
+
   it('employment-type mismatch rejected — rejects generation when employee employmentType does not match template', async () => {
     // softwareEngineer is Full-Time
     const targetEmployeeId = await employeeIdByEmail(SEEDED.softwareEngineer);

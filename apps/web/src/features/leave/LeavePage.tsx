@@ -9,6 +9,8 @@ import {
   PageHeader,
 } from '../../components/ui';
 import {
+  LEAVE_DOC_MAX_BYTES,
+  LEAVE_DOC_MIME_TYPES,
   useApplyLeave,
   useCancelLeave,
   useCreateLeaveType,
@@ -17,7 +19,9 @@ import {
   useLeaveTypes,
   useReviewLeave,
   useTeamCalendar,
+  useUploadLeaveDocument,
 } from './api';
+import { downloadDocument } from '../documents/api';
 
 export function LeavePage() {
   const { account } = useAuth();
@@ -32,6 +36,11 @@ export function LeavePage() {
   const [activeTab, setActiveTab] = useState<'my' | 'approvals' | 'calendar' | 'types'>('my');
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
 
+  // Server-side pagination for the request lists (§9 — paginated tables).
+  const [myPage, setMyPage] = useState(1);
+  const [approvalsPage, setApprovalsPage] = useState(1);
+  const REQUEST_PAGE_SIZE = 10;
+
   // Modals
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState<{ id: string; action: 'Approved' | 'Rejected' } | null>(null);
@@ -45,6 +54,13 @@ export function LeavePage() {
     halfDay: false,
     reason: '',
   });
+
+  // Supporting document for the apply form (§8.6): uploaded immediately on
+  // selection, then referenced by `documentId` when the request is submitted.
+  const [leaveDoc, setLeaveDoc] = useState<{ documentId: string; originalName: string } | null>(
+    null,
+  );
+  const [docUploading, setDocUploading] = useState(false);
 
   const [reviewNote, setReviewNote] = useState('');
 
@@ -63,10 +79,12 @@ export function LeavePage() {
   const balancesQuery = useLeaveBalances({ year: currentYear });
   const myRequestsQuery = useLeaveRequests({
     employeeId: account?.role === 'Employee' ? account.employeeId ?? undefined : undefined,
+    page: myPage,
+    limit: REQUEST_PAGE_SIZE,
   });
   const approvalsQuery = useLeaveRequests(
     isManager
-      ? { status: 'Pending' }
+      ? { status: 'Pending', page: approvalsPage, limit: REQUEST_PAGE_SIZE }
       : { status: 'Pending', employeeId: '000000000000000000000000' }, // dummy if not manager
   );
   const calendarQuery = useTeamCalendar(selectedMonth);
@@ -76,6 +94,23 @@ export function LeavePage() {
   const reviewMutation = useReviewLeave();
   const cancelMutation = useCancelLeave();
   const createTypeMutation = useCreateLeaveType();
+  const uploadDocMutation = useUploadLeaveDocument();
+
+  const selectedApplyType = typesQuery.data?.find((lt) => lt.id === applyForm.leaveTypeId);
+  const docRequired = Boolean(selectedApplyType?.requiresDocument);
+
+  const resetApplyModal = () => {
+    setShowApplyModal(false);
+    setLeaveDoc(null);
+    setDocUploading(false);
+    setApplyForm({
+      leaveTypeId: '',
+      fromDate: today,
+      toDate: today,
+      halfDay: false,
+      reason: '',
+    });
+  };
 
   const handleApplySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,19 +118,62 @@ export function LeavePage() {
       notify('error', 'Please select a leave type');
       return;
     }
+    if (docRequired && !leaveDoc) {
+      notify('error', 'This leave type requires a supporting document');
+      return;
+    }
     try {
-      await applyMutation.mutateAsync(applyForm);
-      notify('success', 'Leave applied successfully');
-      setShowApplyModal(false);
-      setApplyForm({
-        leaveTypeId: '',
-        fromDate: today,
-        toDate: today,
-        halfDay: false,
-        reason: '',
+      await applyMutation.mutateAsync({
+        ...applyForm,
+        ...(leaveDoc ? { documentId: leaveDoc.documentId } : {}),
       });
+      notify('success', 'Leave applied successfully');
+      resetApplyModal();
     } catch (err: unknown) {
       notify('error', err instanceof Error ? err.message : 'Failed to apply leave');
+    }
+  };
+
+  const handleDocSelect = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const input = event.target;
+    const file = input.files?.[0] ?? null;
+    setLeaveDoc(null);
+    if (!file) return;
+
+    // Client pre-check mirroring the backend whitelist; the server re-validates.
+    if (!(LEAVE_DOC_MIME_TYPES as readonly string[]).includes(file.type)) {
+      notify('error', 'Unsupported file type. Upload PDF, DOC, DOCX, JPG or PNG.');
+      input.value = '';
+      return;
+    }
+    if (file.size > LEAVE_DOC_MAX_BYTES) {
+      notify('error', 'File exceeds the 10 MB upload limit.');
+      input.value = '';
+      return;
+    }
+
+    setDocUploading(true);
+    try {
+      const result = await uploadDocMutation.mutateAsync({ file });
+      setLeaveDoc({
+        documentId: result.data.documentId,
+        originalName: result.data.originalName,
+      });
+      notify('success', 'Supporting document uploaded');
+    } catch (err: unknown) {
+      notify('error', err instanceof Error ? err.message : 'Document upload failed');
+      input.value = '';
+    } finally {
+      setDocUploading(false);
+    }
+  };
+
+  const handleDownloadDoc = async (documentId: string | null | undefined): Promise<void> => {
+    if (!documentId) return;
+    try {
+      await downloadDocument(documentId);
+    } catch (err: unknown) {
+      notify('error', err instanceof Error ? err.message : 'Download failed');
     }
   };
 
@@ -289,7 +367,18 @@ export function LeavePage() {
                       <td className="px-4 py-3 text-slate-700 font-semibold">
                         {req.days} {req.halfDay ? '(Half Day)' : ''}
                       </td>
-                      <td className="px-4 py-3 text-slate-600 max-w-xs truncate">{req.reason}</td>
+                      <td className="px-4 py-3 text-slate-600 max-w-xs">
+                        <span className="block truncate">{req.reason}</span>
+                        {req.documentId ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleDownloadDoc(req.documentId)}
+                            className="mt-1 text-xs font-medium text-brand-600 hover:underline"
+                          >
+                            📎 Supporting document
+                          </button>
+                        ) : null}
+                      </td>
                       <td className="px-4 py-3">
                         <span
                           className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -304,6 +393,11 @@ export function LeavePage() {
                         >
                           {req.status}
                         </span>
+                        {req.status !== 'Pending' && req.approverId?.email ? (
+                          <span className="mt-1 block text-xs text-slate-400">
+                            by {req.approverId.email}
+                          </span>
+                        ) : null}
                       </td>
                       <td className="px-4 py-3 text-right">
                         {(req.status === 'Pending' || (req.status === 'Approved' && req.fromDate > today)) && (
@@ -320,6 +414,45 @@ export function LeavePage() {
                   ))}
                 </tbody>
               </table>
+              {(myRequestsQuery.data?.meta.total ?? 0) > REQUEST_PAGE_SIZE && (
+                <nav
+                  aria-label="My leave requests pagination"
+                  className="flex items-center justify-between border-t border-slate-200 px-4 py-3 text-sm"
+                >
+                  <p className="text-slate-500">
+                    {myRequestsQuery.data?.meta.total} request
+                    {(myRequestsQuery.data?.meta.total ?? 0) === 1 ? '' : 's'} · Page {myPage} of{' '}
+                    {Math.max(
+                      1,
+                      Math.ceil((myRequestsQuery.data?.meta.total ?? 0) / REQUEST_PAGE_SIZE),
+                    )}
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={myPage <= 1}
+                      onClick={() => setMyPage((current) => Math.max(1, current - 1))}
+                      className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      type="button"
+                      disabled={
+                        myPage >=
+                        Math.max(
+                          1,
+                          Math.ceil((myRequestsQuery.data?.meta.total ?? 0) / REQUEST_PAGE_SIZE),
+                        )
+                      }
+                      onClick={() => setMyPage((current) => current + 1)}
+                      className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </nav>
+              )}
             </div>
           )}
         </div>
@@ -359,7 +492,18 @@ export function LeavePage() {
                         {req.fromDate} to {req.toDate}
                       </td>
                       <td className="px-4 py-3 font-semibold">{req.days}</td>
-                      <td className="px-4 py-3 text-slate-600 max-w-xs truncate">{req.reason}</td>
+                      <td className="px-4 py-3 text-slate-600 max-w-xs">
+                        <span className="block truncate">{req.reason}</span>
+                        {req.documentId ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleDownloadDoc(req.documentId)}
+                            className="mt-1 text-xs font-medium text-brand-600 hover:underline"
+                          >
+                            📎 Supporting document
+                          </button>
+                        ) : null}
+                      </td>
                       <td className="px-4 py-3 text-right space-x-2">
                         <button
                           type="button"
@@ -380,6 +524,44 @@ export function LeavePage() {
                   ))}
                 </tbody>
               </table>
+              {(approvalsQuery.data?.meta.total ?? 0) > REQUEST_PAGE_SIZE && (
+                <nav
+                  aria-label="Pending approvals pagination"
+                  className="flex items-center justify-between border-t border-slate-200 px-4 py-3 text-sm"
+                >
+                  <p className="text-slate-500">
+                    {approvalsQuery.data?.meta.total} pending · Page {approvalsPage} of{' '}
+                    {Math.max(
+                      1,
+                      Math.ceil((approvalsQuery.data?.meta.total ?? 0) / REQUEST_PAGE_SIZE),
+                    )}
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={approvalsPage <= 1}
+                      onClick={() => setApprovalsPage((current) => Math.max(1, current - 1))}
+                      className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      type="button"
+                      disabled={
+                        approvalsPage >=
+                        Math.max(
+                          1,
+                          Math.ceil((approvalsQuery.data?.meta.total ?? 0) / REQUEST_PAGE_SIZE),
+                        )
+                      }
+                      onClick={() => setApprovalsPage((current) => current + 1)}
+                      className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </nav>
+              )}
             </div>
           )}
         </div>
@@ -552,10 +734,45 @@ export function LeavePage() {
                   className="w-full rounded border border-slate-300 p-2 text-sm"
                 />
               </div>
+              <div>
+                <label htmlFor="leave-doc" className="block text-xs font-medium text-slate-700 mb-1">
+                  Supporting document{docRequired ? ' *' : ' (optional)'}
+                </label>
+                {!leaveDoc ? (
+                  <input
+                    id="leave-doc"
+                    type="file"
+                    accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                    disabled={docUploading}
+                    onChange={(e) => void handleDocSelect(e)}
+                    className="w-full text-xs text-slate-600 file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-slate-700 hover:file:bg-slate-200"
+                  />
+                ) : (
+                  <div className="flex items-center justify-between gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                    <span className="truncate text-slate-700">📎 {leaveDoc.originalName}</span>
+                    <button
+                      type="button"
+                      onClick={() => setLeaveDoc(null)}
+                      className="shrink-0 font-medium text-rose-600 hover:text-rose-800"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+                {docUploading ? (
+                  <p className="mt-1 text-xs text-slate-500" role="status">
+                    Uploading document…
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-slate-500">
+                    PDF, DOC, DOCX, JPG or PNG — max 10 MB.
+                  </p>
+                )}
+              </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowApplyModal(false)}
+                  onClick={resetApplyModal}
                   className="rounded px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100"
                 >
                   Cancel

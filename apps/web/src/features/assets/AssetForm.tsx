@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { useNavigate } from 'react-router-dom';
 import { ApiError } from '../../api/client';
 import type { AssetItem } from '../../api/types';
-import { useCreateAsset, useUpdateAsset } from './api';
+import { useAssetList, useCreateAsset, useUpdateAsset } from './api';
 import { useToast } from '../../components/Toast';
 import { Card, ErrorState, PageHeader } from '../../components/ui';
 
@@ -43,6 +43,13 @@ export function AssetForm({ initial }: { initial?: AssetItem }) {
 
   const createMutation = useCreateAsset();
   const updateMutation = useUpdateAsset(initial?.id ?? '');
+
+  // D-28: asset types stay free-form strings; existing types are offered as
+  // datalist suggestions only (no enum enforcement in the UI or API).
+  const existingAssetsQuery = useAssetList({ page: 1, limit: 100 });
+  const assetTypeOptions = Array.from(
+    new Set(existingAssetsQuery.data?.data.map((asset) => asset.type) ?? []),
+  ).sort();
 
   const {
     register,
@@ -107,7 +114,18 @@ export function AssetForm({ initial }: { initial?: AssetItem }) {
             </div>
             <div>
               <label htmlFor="type" className={labelClass}>Type *</label>
-              <input id="type" {...register('type')} placeholder="Laptop, Monitor, …" className={fieldClass} />
+              <input
+                id="type"
+                list="asset-type-options"
+                {...register('type')}
+                placeholder="Laptop, Monitor, …"
+                className={fieldClass}
+              />
+              <datalist id="asset-type-options">
+                {assetTypeOptions.map((type) => (
+                  <option key={type} value={type} />
+                ))}
+              </datalist>
               {errors.type ? <p className="mt-1 text-xs text-red-600">{errors.type.message}</p> : null}
             </div>
             <div>

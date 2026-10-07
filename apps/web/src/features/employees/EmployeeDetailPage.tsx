@@ -145,10 +145,29 @@ export function EmployeeDetailPage() {
       />
 
       <div className="mb-4 flex items-center gap-3">
-        <StatusBadge status={employee.status} />
-        <span className="text-sm text-slate-500">
-          {employee.designation ?? 'No designation'} · {employee.employmentType}
-        </span>
+        {employee.photoUrl ? (
+          <img
+            src={employee.photoUrl}
+            alt={`Profile photo of ${employee.fullName}`}
+            className="h-14 w-14 rounded-full border border-slate-200 object-cover"
+            onError={(event) => {
+              (event.target as HTMLImageElement).style.display = 'none';
+            }}
+          />
+        ) : (
+          <span
+            aria-hidden
+            className="flex h-14 w-14 items-center justify-center rounded-full bg-brand-50 text-lg font-semibold text-brand-700"
+          >
+            {(employee.firstName[0] ?? '') + (employee.lastName[0] ?? '')}
+          </span>
+        )}
+        <div>
+          <div className="mb-1"><StatusBadge status={employee.status} /></div>
+          <span className="text-sm text-slate-500">
+            {employee.designation ?? 'No designation'} · {employee.employmentType}
+          </span>
+        </div>
       </div>
 
       <div role="tablist" aria-label="Employee sections" className="mb-4 flex flex-wrap gap-1 border-b border-slate-200">
@@ -200,7 +219,28 @@ export function EmployeeDetailPage() {
               <div className="flex justify-between gap-4"><dt className="text-slate-500">Phone</dt><dd className="text-slate-900">{employee.phone ?? '—'}</dd></div>
               <div className="flex justify-between gap-4"><dt className="text-slate-500">Date of birth</dt><dd className="text-slate-900">{employee.dob ?? '—'}</dd></div>
               <div className="flex justify-between gap-4"><dt className="text-slate-500">Emergency contact</dt><dd className="text-slate-900">{employee.emergencyContact?.name ? `${employee.emergencyContact.name} (${employee.emergencyContact.relation ?? '—'})` : '—'}</dd></div>
+              {employee.emergencyContact?.phone ? (
+                <div className="flex justify-between gap-4"><dt className="text-slate-500">Emergency phone</dt><dd className="text-slate-900">{employee.emergencyContact.phone}</dd></div>
+              ) : null}
             </dl>
+          </Card>
+
+          <Card title="Address">
+            {(() => {
+              const parts = [
+                employee.address?.line1,
+                employee.address?.line2,
+                employee.address?.city,
+                employee.address?.state,
+                employee.address?.postalCode,
+                employee.address?.country,
+              ].filter(Boolean);
+              return parts.length > 0 ? (
+                <p className="text-sm text-slate-900">{parts.join(', ')}</p>
+              ) : (
+                <p className="text-sm text-slate-500">No address on file.</p>
+              );
+            })()}
           </Card>
 
           {employee.compensation ? (
@@ -213,9 +253,26 @@ export function EmployeeDetailPage() {
 
           {employee.bankDetails ? (
             <Card title="Bank details">
-              <p className="text-sm text-slate-500">
-                Masked account details on file ({employee.bankDetails.bankName ?? 'bank not recorded'}).
-              </p>
+              {employee.bankDetails.masked ? (
+                <p className="text-sm text-slate-500">
+                  Masked account details on file ({employee.bankDetails.bankName ?? 'bank not recorded'}).
+                </p>
+              ) : (
+                <dl className="space-y-2 text-sm">
+                  {employee.bankDetails.accountHolder ? (
+                    <div className="flex justify-between gap-4"><dt className="text-slate-500">Account holder</dt><dd className="text-slate-900">{employee.bankDetails.accountHolder}</dd></div>
+                  ) : null}
+                  {employee.bankDetails.accountNumber ? (
+                    <div className="flex justify-between gap-4"><dt className="text-slate-500">Account number</dt><dd className="font-mono text-slate-900">{employee.bankDetails.accountNumber}</dd></div>
+                  ) : null}
+                  {employee.bankDetails.ifscOrRouting ? (
+                    <div className="flex justify-between gap-4"><dt className="text-slate-500">IFSC / routing</dt><dd className="text-slate-900">{employee.bankDetails.ifscOrRouting}</dd></div>
+                  ) : null}
+                  {employee.bankDetails.bankName ? (
+                    <div className="flex justify-between gap-4"><dt className="text-slate-500">Bank</dt><dd className="text-slate-900">{employee.bankDetails.bankName}</dd></div>
+                  ) : null}
+                </dl>
+              )}
             </Card>
           ) : null}
 

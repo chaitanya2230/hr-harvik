@@ -40,7 +40,11 @@ export function LicenseListPage() {
   const notify = useToast();
   const canManage = account?.permissions.includes('manageLicenses') ?? false;
 
-  const [tab, setTab] = useState<'licenses' | 'assignments' | 'access'>('licenses');
+  const [tab, setTab] = useState<'licenses' | 'assignments' | 'access'>(() => {
+    // Deep links (dashboard cards) land on the right tab: /licenses?tab=assignments
+    const requested = searchParams.get('tab');
+    return requested === 'assignments' || requested === 'access' ? requested : 'licenses';
+  });
   const [page, setPage] = useState(1);
   const [q, setQ] = useState('');
   const [submittedQ, setSubmittedQ] = useState('');

@@ -117,8 +117,9 @@ describe('dashboard summary (§8.1)', () => {
     const links = response.body.data.links as Record<string, string | null>;
     expect(links.totalEmployees).toBe('/employees');
     expect(links.newJoiners).toMatch(/^\/employees\?joinedFrom=\d{4}-\d{2}-\d{2}$/);
-    expect(links.pendingAssetReturns).toBe('/assets/assignments?active=true');
-    expect(links.pendingLicenseRevocations).toBe('/licenses/assignments?status=Assigned');
+    expect(links.pendingAssetReturns).toBe('/assets?tab=assignments&active=true');
+    expect(links.pendingLicenseRevocations).toBe('/licenses?tab=assignments');
+    expect(links.pendingHrActions).toBe('/notifications?read=false');
     // P5 introduces /leave link for onLeave
     expect(links.onLeave).toBe('/leave');
     // P6 introduces /onboarding link for pendingOnboarding
@@ -190,6 +191,41 @@ describe('dashboard summary (§8.1)', () => {
     expect(response.status).toBe(200);
     expect(response.body.data.scope.kind).toBe('self');
     expect(response.body.data.scope.visibleEmployeeIds).toBe(1);
+  });
+
+  it('derives quick-action visibility from each role’s permissions (§6/§8.1)', async () => {
+    type QuickAction = { key: string; enabled: boolean };
+    const actionsFor = async (session: Session): Promise<QuickAction[]> => {
+      const response = await request(app)
+        .get('/api/v1/dashboard/summary')
+        .set(...bearer(session.accessToken));
+      expect(response.status).toBe(200);
+      return response.body.data.quickActions as QuickAction[];
+    };
+
+    // HR Admin: every workflow available.
+    const adminActions = await actionsFor(admin);
+    expect(adminActions.length).toBeGreaterThanOrEqual(7);
+    expect(adminActions.every((a) => a.enabled)).toBe(true);
+
+    // HR Manager shares the organisation cache entry with HR Admin but must
+    // still receive HR-Manager-scoped flags — the cache recomputes them per
+    // requester rather than serving HR Admin's answer.
+    const hrActions = await actionsFor(hrManager);
+    expect(hrActions.find((a) => a.key === 'addEmployee')?.enabled).toBe(true);
+    expect(hrActions.find((a) => a.key === 'generateDocument')?.enabled).toBe(true);
+
+    // Manager: team-scoped role — none of the seven admin workflows are granted.
+    const managerActions = await actionsFor(manager);
+    expect(managerActions.map((a) => a.key).sort()).toEqual(
+      expect.arrayContaining(['addEmployee', 'addCandidate', 'processExit']),
+    );
+    expect(managerActions.every((a) => a.enabled)).toBe(false);
+
+    // Employee: self-service only — all admin workflows hidden (advisory;
+    // the backend still enforces each permission on its own route).
+    const employeeActions = await actionsFor(employee);
+    expect(employeeActions.every((a) => a.enabled)).toBe(false);
   });
 
   it('rejects unauthenticated access with 401', async () => {

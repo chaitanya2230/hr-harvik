@@ -36,6 +36,37 @@ const BASE = '/api/v1';
 let accessToken: string | null = null;
 let refreshInFlight: Promise<boolean> | null = null;
 
+/**
+ * AGENTS.md §6/§11 — a failed refresh means the session is gone. The client
+ * raises `SessionExpiredError` for the failing caller, but the rest of the app
+ * has to learn about it too so it can drop cached data and route to /login
+ * instead of stranding the user on a dead page.
+ */
+const sessionExpiredListeners = new Set<() => void>();
+
+/**
+ * Subscribe to unrecoverable session expiry. Returns an unsubscribe function.
+ * Listeners are invoked synchronously, immediately before the
+ * `SessionExpiredError` is thrown, from both `apiRequest` and `apiDownload`.
+ * The login call (`skipRefresh`) never refreshes, so it never notifies.
+ */
+export function onSessionExpired(listener: () => void): () => void {
+  sessionExpiredListeners.add(listener);
+  return () => {
+    sessionExpiredListeners.delete(listener);
+  };
+}
+
+function emitSessionExpired(): void {
+  for (const listener of Array.from(sessionExpiredListeners)) {
+    try {
+      listener();
+    } catch {
+      // A misbehaving listener must not mask the SessionExpiredError contract.
+    }
+  }
+}
+
 export const setAccessToken = (token: string | null): void => {
   accessToken = token;
 };
@@ -117,6 +148,7 @@ export async function apiRequest<T>(
       response = await send();
     } else {
       accessToken = null;
+      emitSessionExpired();
       throw new SessionExpiredError();
     }
   }
@@ -143,6 +175,7 @@ export async function apiDownload(path: string, fallbackFilename = 'document.pdf
       response = await send();
     } else {
       accessToken = null;
+      emitSessionExpired();
       throw new SessionExpiredError();
     }
   }

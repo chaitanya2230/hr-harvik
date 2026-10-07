@@ -58,6 +58,7 @@ export interface LeaveRequestRecord {
   reason: string;
   status: 'Pending' | 'Approved' | 'Rejected' | 'Cancelled';
   documentId?: string | null;
+  approverId?: { _id: string; email: string } | null;
   decisionNote?: string | null;
   createdAt: string;
 }
@@ -197,5 +198,46 @@ export function useTeamCalendar(month: string) {
     queryKey: ['leave', 'calendar', month],
     queryFn: () =>
       apiRequest<{ data: CalendarLeaveRecord[] }>(`/leave/calendar?month=${month}`).then((r) => r.data),
+  });
+}
+
+/** MIME whitelist mirroring the backend document storage (§8.6 / §13). */
+export const LEAVE_DOC_MIME_TYPES = [
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'image/jpeg',
+  'image/png',
+] as const;
+
+/** Mirrors the backend's default `MAX_UPLOAD_MB=10`. */
+export const LEAVE_DOC_MAX_BYTES = 10 * 1024 * 1024;
+
+export interface LeaveDocumentUpload {
+  documentId: string;
+  title: string;
+  employeeId: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+}
+
+/**
+ * AGENTS.md §8.6 — supporting-document upload for leave requests
+ * (`POST /leave/documents`, multipart). The resulting `documentId` is passed
+ * to `useApplyLeave`, where the backend re-validates ownership and the
+ * `requiresDocument` rule.
+ */
+export function useUploadLeaveDocument() {
+  return useMutation({
+    mutationFn: ({ file, employeeId }: { file: File; employeeId?: string }) => {
+      const form = new FormData();
+      form.append('file', file);
+      if (employeeId) form.append('employeeId', employeeId);
+      return apiRequest<{ data: LeaveDocumentUpload }>('/leave/documents', {
+        method: 'POST',
+        body: form,
+      });
+    },
   });
 }

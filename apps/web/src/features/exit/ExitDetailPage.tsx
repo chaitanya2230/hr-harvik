@@ -11,6 +11,7 @@ import {
 } from './api';
 import { useAuth } from '../auth/auth-context';
 import { useToast } from '../../components/Toast';
+import { downloadDocument, useDocumentTemplates, useGenerateDocument } from '../documents/api';
 import { Card, ErrorState, LoadingState, PageHeader } from '../../components/ui';
 import type { ChecklistStatus, ClearanceStatus, ExitChecklistItem, ExitStage, FinalSettlementStatus } from '../../api/types';
 
@@ -71,6 +72,13 @@ export function ExitDetailPage() {
   const updateSettlement = useUpdateSettlement(employeeId ?? '');
   const relieveMut = useRelieveEmployee(employeeId ?? '');
   const withdrawMut = useWithdrawExit(employeeId ?? '');
+
+  // §8.10/§8.7 — Experience / Relieving letter generation from the exit screen.
+  // Generation is `manageDocuments`-gated server-side; the backend also links
+  // the generated document to this exit record automatically.
+  const canManageDocuments = account?.permissions.includes('manageDocuments') ?? false;
+  const templatesQuery = useDocumentTemplates({ isActive: true }, canManageDocuments);
+  const generateLetterMut = useGenerateDocument();
 
   const [clearanceComments, setClearanceComments] = useState('');
   const [settlementNote, setSettlementNote] = useState('');
@@ -156,6 +164,36 @@ export function ExitDetailPage() {
     } catch (caught) {
       notify('error', caught instanceof ApiError ? caught.message : 'Failed to withdraw exit');
       setConfirmingWithdraw(false);
+    }
+  };
+
+  const onGenerateLetter = async (category: string): Promise<void> => {
+    const template = templatesQuery.data?.data.find((t) => t.category === category);
+    if (!template || !employeeId) {
+      notify('error', `No active ${category} template is configured`);
+      return;
+    }
+    try {
+      const generated = await generateLetterMut.mutateAsync({
+        templateId: template.id,
+        employeeId,
+      });
+      notify('success', `${category} generated and linked to this exit`);
+      // Offer the PDF right away; the exit view refreshes via invalidation.
+      if (generated.document) {
+        await downloadDocument(generated.document.id, `${generated.document.title}.pdf`);
+      }
+    } catch (caught) {
+      notify('error', caught instanceof ApiError ? caught.message : 'Failed to generate letter');
+    }
+  };
+
+  const onDownloadLetter = async (docId: string | null | undefined): Promise<void> => {
+    if (!docId) return;
+    try {
+      await downloadDocument(docId);
+    } catch (caught) {
+      notify('error', caught instanceof ApiError ? caught.message : 'Download failed');
     }
   };
 
@@ -361,6 +399,75 @@ export function ExitDetailPage() {
               </ul>
             </Card>
           )}
+
+          {/* Letters — Experience / Relieving generation (§8.10 Documents stage) */}
+          <Card title="Letters">
+            <div className="space-y-3">
+              {(
+                [
+                  {
+                    category: 'Experience Certificate',
+                    label: 'Experience Letter',
+                    docId: exit.experienceLetterDocId,
+                  },
+                  {
+                    category: 'Relieving Letter',
+                    label: 'Relieving Letter',
+                    docId: exit.relievingLetterDocId,
+                  },
+                ] as const
+              ).map((letter) => (
+                <div
+                  key={letter.category}
+                  className="flex items-center justify-between gap-3 text-sm"
+                >
+                  <div>
+                    <p className="font-medium text-slate-900">{letter.label}</p>
+                    <p className="text-xs text-slate-500">
+                      {letter.docId
+                        ? 'Generated and linked to this exit'
+                        : 'Not generated yet'}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    {letter.docId ? (
+                      <button
+                        type="button"
+                        onClick={() => void onDownloadLetter(letter.docId)}
+                        className="rounded-md border border-slate-300 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50"
+                      >
+                        Download
+                      </button>
+                    ) : null}
+                    {canManageDocuments && !isCancelled ? (
+                      <button
+                        type="button"
+                        disabled={
+                          generateLetterMut.isPending ||
+                          templatesQuery.isPending ||
+                          Boolean(letter.docId)
+                        }
+                        onClick={() => void onGenerateLetter(letter.category)}
+                        className="rounded-md border border-brand-300 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-50"
+                        title={
+                          letter.docId
+                            ? 'A letter is already generated and linked to this exit'
+                            : undefined
+                        }
+                      >
+                        {generateLetterMut.isPending ? 'Generating…' : 'Generate'}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+              {templatesQuery.isError ? (
+                <p className="text-xs text-red-600" role="alert">
+                  Letter templates could not be loaded. Try again.
+                </p>
+              ) : null}
+            </div>
+          </Card>
         </div>
 
         {/* Right column — clearances, settlement, actions */}

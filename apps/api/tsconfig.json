@@ -5,7 +5,7 @@
     "module": "CommonJS",
     "moduleResolution": "Node",
     "rootDir": "src",
-    "outDir": "dist",
+    "outDir": "coverage/dist",
 
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -26,5 +26,5 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "tests"]
+  "exclude": ["node_modules", "coverage/dist", "tests"]
 }

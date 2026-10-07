@@ -66,6 +66,19 @@ async function bootstrap(): Promise<void> {
   );
   await attendanceQueue.close();
 
+  const remindersQueue = new Queue(QUEUE_NAMES.reminders, { connection });
+  await remindersQueue.add(
+    'daily-reminders-sync',
+    {},
+    {
+      repeat: { pattern: DAILY_08_00 },
+      jobId: 'reminders:daily-sync',
+      removeOnComplete: 100,
+      removeOnFail: 500,
+    },
+  );
+  await remindersQueue.close();
+
   logger.info(
     { queues: workers.map((worker) => worker.name) },
     'Harvik HR worker started',

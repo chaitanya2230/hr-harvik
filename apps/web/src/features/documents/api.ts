@@ -217,28 +217,74 @@ export function usePreviewTemplate() {
   });
 }
 
+export interface QueuedPdfJobAccepted {
+  jobId: string;
+  status: 'pending';
+}
+
+export interface PdfJobStatus {
+  status: 'pending' | 'completed' | 'failed';
+  documentId: string | null;
+  error: string | null;
+  templateId: string;
+  employeeId: string;
+  createdAt: string;
+}
+
+export type GenerateDocumentResult =
+  | { queued: QueuedPdfJobAccepted; document?: undefined }
+  | { document: DocumentItem; queued?: undefined };
+
 export function useGenerateDocument() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       templateId,
       employeeId,
       title,
       confidential,
+      mode,
     }: {
       templateId: string;
       employeeId: string;
       title?: string;
       confidential?: boolean;
-    }) =>
-      apiRequest<ItemResponse<DocumentItem>>(`/document-templates/${templateId}/generate`, {
-        method: 'POST',
-        body: { employeeId, title, confidential },
-      }),
+      /** §3 — `queued` returns `202 { jobId }` immediately; default is sync. */
+      mode?: 'sync' | 'queued';
+    }): Promise<GenerateDocumentResult> => {
+      const res = await apiRequest<ItemResponse<DocumentItem | QueuedPdfJobAccepted>>(
+        `/document-templates/${templateId}/generate`,
+        {
+          method: 'POST',
+          body: { employeeId, title, confidential, ...(mode ? { mode } : {}) },
+        },
+      );
+      const value = res.data;
+      if (value && typeof value === 'object' && 'jobId' in value) {
+        return { queued: value as QueuedPdfJobAccepted };
+      }
+      return { document: value as DocumentItem };
+    },
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: documentKeys.all });
       void client.invalidateQueries({ queryKey: ['dashboard'] });
       void client.invalidateQueries({ queryKey: ['exit'] });
+    },
+  });
+}
+
+/** Polls a queued PDF generation job (§3 — mirrors `useExportJobStatus`). */
+export function usePdfGenerateJob(jobId: string | null) {
+  return useQuery({
+    queryKey: ['documentPdfJob', jobId],
+    queryFn: () =>
+      apiRequest<ItemResponse<PdfJobStatus>>(`/documents/pdf-jobs/${jobId}`).then(
+        (res) => res.data,
+      ),
+    enabled: jobId !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'completed' || status === 'failed' ? false : 2000;
     },
   });
 }

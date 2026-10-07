@@ -728,6 +728,85 @@ All operations execute inside a single MongoDB session transaction with `withTra
 - Seeded 15 candidates spanning all pipeline stages: Applied, Shortlisted, Interview (with scheduled/completed rounds, feedback, and 1–5 ratings), Selected, Offer (Sent/Accepted/Declined), Joined (linked to converted employees), and Rejected (with rejection reasons).
 - Seeded onboarding records for all 25 employees with realistic status distributions based on tenure and status (Completed for long-term employees, In Progress for probation/new joiners).
 
+## D-46 — P7 Reports: scoped queries, secret exclusion, Redis-backed async exports
+
+*Status: accepted · P7*
+
+- All 11 §8.11 reports share one `generateReportData` dispatcher with per-report RBAC: directory-like reports refuse Employees, cost-summary refuses non-HR, compensation columns render HR-only, and bank fields are never selected into rows.
+- Large exports must actually survive the API/worker process boundary: async results live in Redis (`report-export:{jobId}`, 1h TTL, xlsx as base64) instead of process memory, each job records its requesting `ownerId`, and polling requires ownership (HR Admin bypass). Exports beyond 1,000 rows auto-queue even without `async=true`.
+- Unknown report types fail closed at the Zod enum boundary (400); every export path reuses the same column/row builder as the JSON view so formats cannot drift.
+
+## D-47 — P7 Notifications: dedupe keys, reminder rules, dual transport
+
+*Status: accepted · P7*
+
+- Every reminder carries a deterministic `dedupeKey` (rule + subject + date + recipient) backed by a sparse unique index with find-then-create plus E11000 recovery, so overlapping scheduler runs and retries never duplicate.
+- All 8 §8.12 rules run in `runScheduledReminders` (joining 3/1d, leaving 7/1d, probation 7d, document expiry 30/7d, renewal 30/7d, asset return 3d + daily overdue, >24h approvals, immediate leave events); leave apply/decision hooks are awaited so the in-app row commits with the response.
+- Email goes through Nodemailer SMTP when configured, otherwise the stream (log) transport in development/test; only recipient/subject/message-id are logged, never bodies or secrets.
+- The frontend bell shows the server-side unread count and links to a scoped inbox; list/read/all-read endpoints only ever touch the caller's own rows (403 on others').
+
+---
+
+## D-48 — Settings & Users modules: single-row system settings, guarded user administration
+
+*Status: accepted · P7 extension (audit close)*
+
+- System settings live in a singleton document (`key: 'system'`) — company name, timezone/IANA, `minAgeIntern`/`minAgeOther`, `probationDefault` — consumed by employee validation, date utilities and the PDF template context. `GET /settings` is available to every authenticated role (non-sensitive), `PATCH` is gated on `manageSettings` (HR Admin only).
+- Settings audit rows record `entityId: null`: the audit schema is ObjectId-only and the singleton has no meaningful id; the before/after snapshot carries the change.
+- The users module centralises user CRUD under `manageUsers` (HR Admin): list/search, role change, enable/disable, reset password. Guards: a user cannot change their own role or disable themselves, and the last active HR Admin cannot be demoted or disabled. Login creation for a new employee is optional (below).
+
+## D-49 — trustedFilter extension to the users module under global sanitizeFilter
+
+*Status: accepted · audit fix (P7 extension)*
+
+`user.service.ts` builds `$in` (q-search) and `$ne` (last-active-HR-Admin guard) operator fragments; under global `mongoose.set('sanitizeFilter', true)` (D-27) these must pass through `trustedFilter()` from `apps/api/src/utils/mongo.ts`, exactly as `exit.service.ts` did in D-34. RegExp literals and update operators (`$set`) are unaffected. `users.test.ts` pins the count query and the guard behaviour.
+
+## D-50 — Leave supporting documents: dedicated upload endpoint and `requiresDocument` enforcement
+
+*Status: accepted · audit fix (P5)*
+
+- New `POST /api/v1/leave/documents` (multipart `file`, optional `employeeId`/`title`) accepts PDF/DOC/DOCX/JPG/PNG ≤10 MB, stored through the shared secure `storage.service` (random server filename, magic-byte validation, no public static path). Scope: the employee themself or HR staff; the document is category `Other`, `confidential: false`.
+- Leave types with `requiresDocument: true` now enforce it at application time: the body carries `documentId` and the service rejects the request with 422 when the document is missing or does not belong to the applicant. The frontend Leave page adds a required file input backed by this endpoint.
+
+## D-51 — Optional login creation on employee create — role guard stricter than the audit draft
+
+*Status: accepted · audit close (P1)*
+
+AGENTS.md §8.2 "Creating employee can optionally create login" is implemented with `createLogin: { email?, password?, role? }` in the create body (strict schema, default role `Employee`). The backend blocks any non-HR-Admin from creating an `HR Admin` login (validation rejects the role with 403-context message) but otherwise lets HR roles pick among remaining roles; the frontend Employee form surfaces all four roles to HR Admin and `Manager`/`Employee` to everyone else. This is a documented departure from the audit's draft that proposed hiding the entire feature from non-admins — the capability is a legitimately useful HR Manager workflow, only the privilege escalation is constrained.
+
+## D-52 — Exit Experience/Relieving letters generated from the Exit UI
+
+*Status: accepted · workflow completion (P3)*
+
+The Exit detail page now offers "Letters" actions that select the matching template by category (Experience Certificate / Relieving Letter), call the existing generate endpoint, auto-download the PDF, and rely on the D-35 linkage (document auto-linked to `exit.experienceLetterDocId`/`exit.relievingLetterDocId` and checklist items completed). The Generate button is disabled once the corresponding `docId` is set; the backend already restricts Experience Certificates to On Notice/Relieved employees.
+
+## D-53 — Queued PDF generation (G3 close): opt-in `mode: 'queued'`, Redis-backed job store
+
+*Status: accepted · P7 extension (audit close)*
+
+- `POST /document-templates/:id/generate` accepts `mode: 'queued'` (default stays synchronous): it records `pdf-generate:{jobId}` in Redis (1h TTL, `pending`), enqueues on the existing-but-unused `harvik-pdf-generation` BullMQ queue, and answers `202 { jobId, status: 'pending' }`. The worker consumes it via the new `pdfGenerationJob` handler in `jobs/index.ts`; `runPdfGenerationJob` reuses the exact synchronous `generateDocument` service, so queued and sync outputs cannot drift.
+- A new `GET /documents/pdf-jobs/:jobId` poll endpoint is ownership-scoped (requester-only, HR Admin bypass), mirroring D-46 report exports; an unknown job id is 404.
+- When Redis has no live queue (unit tests / no worker), the job runs inline after a 10 ms tick so the pending → completed/failed contract still holds — the same tolerance the report-export tests rely on. Frontend: the Generate modal gains a "Run in background" checkbox and the Documents page polls the job, toasting and refreshing the list on completion.
+
+## D-54 — Frontend workflow completions across P1/P2 (filters, pagination, views, resume-on-create)
+
+*Status: accepted · audit close (P1/P2)*
+
+- Employee list: department, manager and joining-date-range filters (search-param seeded); Documents: employee filter for HR; Leave: server-side pagination on my-requests and approvals plus approver attribution (`approverId { _id, email }` "by …" label); Assets: asset-type `datalist` suggestions (types stay free-form per D-28); Attendance: calendar (42-cell grid with month nav, self/team picker) and history (month/status/employee filters, paginated) views; Candidates: resume upload on create (create is JSON-only, so the file posts to the resume endpoint immediately after, with a graceful toast if that second call fails).
+- Exit list: replaces the "Go to Employee" workaround with an inline Process Exit form (employee, reason, resignation date, notice period, optional LWD, notes) that calls the existing initiate endpoint and navigates to the new exit.
+
+## D-55 — Notification email delivery on BullMQ with inline fallback (G4 close)
+
+*Status: accepted · P7 extension (audit close)*
+
+`createNotification` now enqueues a `deliver-email` job (jobId `notify-email-{id}`, attempts 3, 5 s backoff) on the notifications queue in addition to persisting the in-app row, and falls back to sending the email inline when the queue is unavailable — so the in-app row never blocks on transport and development still sees log-transport emails.
+
+## D-56 — Annual leave rollover wired into the daily maintenance job (G5 close)
+
+*Status: accepted · P7 extension (audit close)*
+
+`runScheduledYearRollover` (allocates the next year's balances, applies `carryForward`/`maxCarryForward`, resets used/pending) is invoked from the worker's `dailyMaintenance` heartbeat, which runs on a schedule; it is idempotent — rolled-over years are skipped on subsequent runs. Local tests exercise `runScheduledYearRollover` directly; the docker worker proves the wiring.
+
 ---
 
 ## Known gaps carried into later phases

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useEmployeeList, type EmployeeListParams } from './api';
+import { useDepartments, useEmployeeList, useManagerOptions, type EmployeeListParams } from './api';
 import { useAuth } from '../auth/auth-context';
 import { EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from '../../components/ui';
 
@@ -35,7 +35,13 @@ export function EmployeeListPage() {
   const [sort, setSort] = useState<string>('-dateOfJoining');
   const [employmentType, setEmploymentType] = useState(searchParams.get('employmentType') ?? '');
   const [status, setStatus] = useState(searchParams.get('status') ?? '');
-  const [joinedFrom] = useState(searchParams.get('joinedFrom') ?? '');
+  const [departmentId, setDepartmentId] = useState(searchParams.get('departmentId') ?? '');
+  const [managerId, setManagerId] = useState(searchParams.get('reportingManagerId') ?? '');
+  const [joinedFrom, setJoinedFrom] = useState(searchParams.get('joinedFrom') ?? '');
+  const [joinedTo, setJoinedTo] = useState(searchParams.get('joinedTo') ?? '');
+
+  const departmentsQuery = useDepartments();
+  const managersQuery = useManagerOptions();
 
   const params: EmployeeListParams = {
     page,
@@ -44,8 +50,15 @@ export function EmployeeListPage() {
     ...(sort ? { sort } : {}),
     ...(employmentType ? { employmentType } : {}),
     ...(status ? { status } : {}),
+    ...(departmentId ? { departmentId } : {}),
+    ...(managerId ? { reportingManagerId: managerId } : {}),
     ...(joinedFrom ? { joinedFrom } : {}),
+    ...(joinedTo ? { joinedTo } : {}),
   };
+
+  const hasFilters = Boolean(
+    submittedQ || employmentType || status || departmentId || managerId || joinedFrom || joinedTo,
+  );
 
   const listQuery = useEmployeeList(params);
   const total = listQuery.data?.meta.total ?? 0;
@@ -122,6 +135,68 @@ export function EmployeeListPage() {
           <option value="Inactive">Inactive</option>
         </select>
         <select
+          aria-label="Department"
+          value={departmentId}
+          onChange={(event) => {
+            setDepartmentId(event.target.value);
+            setPage(1);
+          }}
+          className={inputClass}
+        >
+          <option value="">All departments</option>
+          {departmentsQuery.data?.data.map((dept) => (
+            <option key={dept.id} value={dept.id}>
+              {dept.name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Reporting manager"
+          value={managerId}
+          onChange={(event) => {
+            setManagerId(event.target.value);
+            setPage(1);
+          }}
+          className={inputClass}
+        >
+          <option value="">All managers</option>
+          {managersQuery.data?.data.map((manager) => (
+            <option key={manager.id} value={manager.id}>
+              {manager.fullName} ({manager.employeeCode})
+            </option>
+          ))}
+        </select>
+        <label htmlFor="joined-from" className="sr-only">
+          Joined from
+        </label>
+        <input
+          id="joined-from"
+          type="date"
+          aria-label="Joined from"
+          value={joinedFrom}
+          max={joinedTo || undefined}
+          onChange={(event) => {
+            setJoinedFrom(event.target.value);
+            setPage(1);
+          }}
+          className={inputClass}
+        />
+        <label htmlFor="joined-to" className="sr-only">
+          Joined to
+        </label>
+        <input
+          id="joined-to"
+          type="date"
+          aria-label="Joined to"
+          value={joinedTo}
+          min={joinedFrom || undefined}
+          onChange={(event) => {
+            setJoinedTo(event.target.value);
+            setPage(1);
+          }}
+          className={inputClass}
+        />
+        <select
           aria-label="Sort order"
           value={sort}
           onChange={(event) => {
@@ -142,6 +217,25 @@ export function EmployeeListPage() {
         >
           Search
         </button>
+        {hasFilters ? (
+          <button
+            type="button"
+            onClick={() => {
+              setQ('');
+              setSubmittedQ('');
+              setEmploymentType('');
+              setStatus('');
+              setDepartmentId('');
+              setManagerId('');
+              setJoinedFrom('');
+              setJoinedTo('');
+              setPage(1);
+            }}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100"
+          >
+            Clear filters
+          </button>
+        ) : null}
       </form>
 
       {listQuery.isPending ? (

@@ -1,8 +1,9 @@
 import type { NextFunction, Request, Response } from 'express';
 import multer from 'multer';
 import { env } from '../../config/env';
-import { badRequest, unprocessable } from '../../utils/errors';
+import { badRequest, forbidden, notFound, unauthorized, unprocessable } from '../../utils/errors';
 import * as documentService from './document.service';
+import { getPdfJobResult, queuePdfGenerationJob } from './pdf-queue.service';
 import {
   createTemplateSchema,
   generateDocumentSchema,
@@ -181,6 +182,22 @@ export async function previewTemplateHandler(req: Request, res: Response): Promi
 
 export async function generateDocumentHandler(req: Request, res: Response): Promise<void> {
   const body = generateDocumentSchema.parse(req.body);
+  const context = getContext(req);
+
+  // §3 — opt-in queued generation: enqueue on the BullMQ pdf-generation
+  // queue and let the client poll the job status endpoint.
+  if (body.mode === 'queued') {
+    const jobId = await queuePdfGenerationJob({
+      templateId: idParam(req),
+      employeeId: body.employeeId,
+      title: body.title,
+      confidential: body.confidential ?? false,
+      context,
+    });
+    res.status(202).json({ data: { jobId, status: 'pending' } });
+    return;
+  }
+
   const doc = await documentService.generateDocument(
     {
       templateId: idParam(req),
@@ -188,8 +205,37 @@ export async function generateDocumentHandler(req: Request, res: Response): Prom
       title: body.title,
       confidential: body.confidential,
     },
-    getContext(req),
+    context,
   );
 
   res.status(201).json({ data: doc });
+}
+
+/** Poll endpoint for queued PDF generation (ownership-scoped like exports). */
+export async function getPdfJobHandler(req: Request, res: Response): Promise<void> {
+  const jobId = (req.params.jobId as string) ?? '';
+  if (!jobId) throw badRequest('PDF generation job id is required');
+
+  const account = req.user;
+  if (!account) throw unauthorized('Authentication required');
+
+  const job = await getPdfJobResult(jobId);
+  if (!job) throw notFound('PDF generation job not found');
+
+  // Job results belong to the requester (HR Admin may inspect any job) —
+  // the same ownership rule as report exports.
+  if (job.ownerId !== account.userId && account.role !== 'HR Admin') {
+    throw forbidden('You do not have access to this generation job');
+  }
+
+  res.json({
+    data: {
+      status: job.status,
+      documentId: job.documentId ?? null,
+      error: job.error ?? null,
+      templateId: job.templateId,
+      employeeId: job.employeeId,
+      createdAt: job.createdAt,
+    },
+  });
 }

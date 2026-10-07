@@ -5,6 +5,7 @@ import Handlebars from 'handlebars';
 import sanitizeHtml from 'sanitize-html';
 import { env } from '../../config/env';
 import { unprocessable } from '../../utils/errors';
+import { getSettingsSnapshot } from '../settings/settings.service';
 import type { Types } from 'mongoose';
 import type { EmployeeDoc } from '../employees/employee.schema';
 import type { DocumentTemplateDoc } from './template.schema';
@@ -138,7 +139,9 @@ export async function buildDocumentContext(
       lastWorkingDay: employee.lastWorkingDay ?? exitData?.lastWorkingDay ?? null,
     },
     company: {
-      name: env.COMPANY_NAME || 'Harvik Technologies',
+      // §6/§11 — company identity is a system setting; the settings service
+      // falls back to the `.env` COMPANY_NAME until a settings row exists.
+      name: getSettingsSnapshot().companyName || env.COMPANY_NAME || 'Harvik Technologies',
       website: 'https://harviktech.com/',
       email: env.MAIL_FROM || 'hr@harviktech.com',
     },

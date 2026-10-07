@@ -12,6 +12,7 @@ import { scopeIdsFor } from '../employees/employee.service';
 import { cacheGetJson, cacheSetJson } from '../../utils/cache';
 import { trustedFilter } from '../../utils/mongo';
 import { addDaysIso, todayInTimeZone } from '../../utils/dates';
+import { PERMISSIONS, ROLE_PERMISSIONS, type Permission } from '../../config/constants';
 import { dashboardCacheKey, DASHBOARD_CACHE_TTL } from './dashboard.cache';
 import { getPendingOnboardingCount } from '../onboarding/onboarding.service';
 import type { AuthAccount } from '../auth/auth.service';
@@ -123,16 +124,27 @@ const chip = (doc: {
 
 /**
  * §8.1 quick actions.
+ *
+ * Each action declares the permission that authorises it server-side, so the
+ * list the UI renders is role-filtered (§6): an Employee or Manager receives
+ * the actions with `enabled: false` and the frontend hides them — the routes
+ * behind them enforce the same permissions regardless.
  */
-const QUICK_ACTIONS: QuickAction[] = [
-  { key: 'addEmployee', label: 'Add Employee', href: '/employees/new', enabled: true },
-  { key: 'addCandidate', label: 'Add Candidate', href: '/recruitment/candidates', enabled: true },
-  { key: 'startOnboarding', label: 'Start Onboarding', href: '/onboarding', enabled: true },
-  { key: 'generateDocument', label: 'Generate Document', href: '/documents', enabled: true },
-  { key: 'assignAsset', label: 'Assign Asset', href: '/assets', enabled: true },
-  { key: 'assignLicense', label: 'Assign Software License', href: '/licenses', enabled: true },
-  { key: 'processExit', label: 'Process Exit', href: '/exit', enabled: true },
+const QUICK_ACTIONS: ReadonlyArray<Omit<QuickAction, 'enabled'> & { permission: Permission }> = [
+  { key: 'addEmployee', label: 'Add Employee', href: '/employees/new', permission: PERMISSIONS.createEmployee },
+  { key: 'addCandidate', label: 'Add Candidate', href: '/recruitment/candidates', permission: PERMISSIONS.manageCandidates },
+  { key: 'startOnboarding', label: 'Start Onboarding', href: '/onboarding', permission: PERMISSIONS.manageOnboarding },
+  { key: 'generateDocument', label: 'Generate Document', href: '/documents', permission: PERMISSIONS.manageDocuments },
+  { key: 'assignAsset', label: 'Assign Asset', href: '/assets', permission: PERMISSIONS.manageAssets },
+  { key: 'assignLicense', label: 'Assign Software License', href: '/licenses', permission: PERMISSIONS.manageLicenses },
+  { key: 'processExit', label: 'Process Exit', href: '/exit', permission: PERMISSIONS.processExit },
 ];
+
+export const quickActionsFor = (account: AuthAccount): QuickAction[] =>
+  QUICK_ACTIONS.map(({ permission, ...action }) => ({
+    ...action,
+    enabled: ROLE_PERMISSIONS[account.role].includes(permission),
+  }));
 
 const UNAVAILABLE: DashboardUnavailable[] = [];
 
@@ -348,16 +360,20 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
       onNotice: '/employees?status=On Notice',
       leavingSoon: '#leaving-soon',
       recentlyJoined: '#recently-joined',
-      pendingHrActions: null,
+      pendingHrActions: '/notifications?read=false',
       pendingOnboarding: '/onboarding',
       pendingDocumentGeneration: '/documents',
-      pendingAssetReturns: '/assets/assignments?active=true',
-      pendingLicenseRevocations: '/licenses/assignments?status=Assigned',
+      // AGENTS.md §8.1 — deep links must land on a real filtered list. The
+      // asset/licence inventories own the `/assets` and `/licenses` routes;
+      // `tab=assignments` opens their assignment ledgers (the list pages
+      // seed their tab and filters from these params).
+      pendingAssetReturns: '/assets?tab=assignments&active=true',
+      pendingLicenseRevocations: '/licenses?tab=assignments',
     },
     unavailable: UNAVAILABLE,
     recentlyJoined: recentlyJoinedDocs.map(chip),
     leavingSoonEmployees: leavingSoonDocs.map(chip),
-    quickActions: QUICK_ACTIONS,
+    quickActions: quickActionsFor(account),
   };
 }
 
@@ -384,7 +400,14 @@ export async function getDashboardSummary(account: AuthAccount): Promise<Dashboa
 
   const cached = await cacheGetJson<DashboardSummary>(key);
   if (cached) {
-    return { ...cached, cache: { ttlSeconds: DASHBOARD_CACHE_TTL, hit: true } };
+    // The cached body is scope-shared (HR Admin and HR Manager share one
+    // organisation entry), so the role-dependent quick actions are always
+    // recomputed for the requesting account rather than replayed.
+    return {
+      ...cached,
+      quickActions: quickActionsFor(account),
+      cache: { ttlSeconds: DASHBOARD_CACHE_TTL, hit: true },
+    };
   }
 
   const summary = await buildDashboardSummary(account);

@@ -3,7 +3,7 @@
 Internal HR system for [Harvik Technologies](https://harviktech.com/), built
 against [`AGENTS.md`](./AGENTS.md).
 
-> **Phase status: P0 → P6 complete.**
+> **Phase status: P0 → P7 complete.**
 > Shipped so far: repository structure, MongoDB 7 replica set, Redis 7 + BullMQ,
 > Express API, JWT auth with refresh rotation, RBAC, audit logging, field-level
 > encryption, seed data, employees, Employee 360, dashboard, assets, licenses,
@@ -14,8 +14,10 @@ against [`AGENTS.md`](./AGENTS.md).
 > atomic overdraft-safe leave requests, recruitment job requisitions, candidate pipeline state machine,
 > interview rounds & feedback ratings, offer management, secure resume storage & authenticated streaming,
 > atomic candidate-to-employee conversion transaction, 14-item onboarding checklists, smart links,
-> cross-domain auto-completion events, and the automated test suite (392 tests passing).
-> Not yet built: reports, notifications.
+> cross-domain auto-completion events, 11 operational reports (JSON/CSV/XLSX, BullMQ large exports),
+> in-app notifications with dedupe keys, 08:00 BullMQ reminders, Nodemailer email with dev log transport,
+> and the automated test suite (421 tests passing).
+> Not yet built: Playwright E2E hardening (P8).
 > Nothing in the UI displays invented data — there are no placeholder metrics.
 
 ---
@@ -27,7 +29,7 @@ Mandated by `AGENTS.md` §3 and not substituted anywhere.
 | Layer | Technology |
 | --- | --- |
 | Frontend | React 19 + Vite 6 (static build, no SSR), React Router 7, TanStack Query 5, React Hook Form, Zod, Tailwind CSS 4, Recharts |
-| Backend | Node.js 22, Express 4, Mongoose 8, Zod, JWT, bcrypt, Helmet, CORS, express-rate-limit, Pino, Multer, BullMQ 5, ioredis 5 |
+| Backend | Node.js 22, Express 4, Mongoose 8, Zod, JWT, bcrypt, Helmet, CORS, express-rate-limit, Pino, Multer, BullMQ 5, ioredis 5, ExcelJS 4, Nodemailer 10 |
 | Database | MongoDB Community **7.0.14**, single-node replica set `rs0` (transactions) |
 | Cache / queues | Redis **7.4** |
 | E2E | Playwright (P8) |
@@ -357,6 +359,15 @@ Base prefix `/api/v1`.
 | `POST` | `/api/v1/leave/requests/:id/review` | bearer + `approveLeaveRequests` | approve/reject leave |
 | `POST` | `/api/v1/leave/requests/:id/cancel` | bearer + scope | cancel pending/approved leave |
 | `GET` | `/api/v1/leave/calendar` | bearer + scope | team leave calendar |
+| `GET` | `/api/v1/reports/:type` | bearer + scope | 11 reports, JSON + pagination (cost HR-only, no bank data) |
+| `GET` | `/api/v1/reports/:type/export?format=csv\|xlsx` | bearer + scope | direct file export |
+| `GET` | `/api/v1/reports/:type/export?async=true` | bearer + scope | BullMQ-queued large export, 202 + jobId |
+| `GET` | `/api/v1/reports/exports/:jobId` | bearer + owner | poll async export (Redis-backed, HR Admin may inspect any) |
+| `GET` | `/api/v1/notifications` | bearer (own only) | inbox, read/unread filter, pagination |
+| `GET` | `/api/v1/notifications/unread-count` | bearer (own only) | badge count for the bell |
+| `PATCH` | `/api/v1/notifications/:id/read` | bearer (own only) | mark read/unread, 403 on others' items |
+| `POST` | `/api/v1/notifications/mark-all-read` | bearer (own only) | mark entire inbox read |
+| `POST` | `/api/v1/notifications/trigger-reminders` | HR Admin / HR Manager | run the 08:00 reminder rules on demand |
 
 Responses:
 
@@ -416,18 +427,18 @@ consume the budget.
 | — | Config validation, logging, errors, `/health`, `/ready` | `config/env`, `utils/logger`, `utils/errors`, `modules/health` | **P0 done** |
 | — | Seed data + four demo logins | `src/seed` | **P0 done** (HR-scoped fixtures) |
 | 2 | Employee management, Employee 360 | `modules/employees` | **P1 done** — CRUD, 360, history, status machine, re-hire, 31 API tests |
-| 1 | Dashboard (14 metrics, 7 quick actions) | `modules/dashboard` | **P1 done, P2/P5 extended** — real MongoDB data, 60s cache; only P6 onboarding + P4 document-generation metrics remain honestly `null` |
-| 3 | Recruitment | `modules/recruitment` | P6 |
-| 4 | Onboarding | `modules/onboarding` | P6 |
+| 1 | Dashboard (14 metrics, 7 quick actions) | `modules/dashboard` | **P1 done, extended through P6** — all 14 metrics computed from live MongoDB data, 60s Redis cache invalidated on writes, per-requester scoping (HR/team/self), clickable deep links into filtered lists, role-derived quick actions |
+| 3 | Recruitment | `modules/recruitment` | **P6 done** — jobs, candidates, strict stage workflow, resume upload/validation, candidate→employee conversion, 18 API tests |
+| 4 | Onboarding | `modules/onboarding` | **P6 done** — 14-item lifecycle, status transitions, cross-domain auto-completion, self-service authorization, 11 API tests |
 | 5 | Attendance | `modules/attendance` | **P5 done** — ledger, daily/monthly grid, corrections, holidays, nightly job, 15 API tests |
 | 6 | Leave | `modules/leave` | **P5 done** — types, balances, requests, calendar, optimistic locking, 19 API tests |
-| 7 | Documents (upload, versions, PDF templates) | `modules/documents` | **P4 done** — secure storage, versions, Handlebars, PDFKit, 17 API tests |
+| 7 | Documents (upload, versions, PDF templates) | `modules/documents` | **P4 done** — secure storage, versions, Handlebars, PDFKit, opt-in BullMQ queued generation (`mode: 'queued'`), 19 API tests |
 | 8 | Hardware / assets | `modules/assets` | **P2 done** — CRUD, assign/return/repair/retire, history, overdue, 26 API tests |
 | 9 | Software / licences / access | `modules/licenses`, `modules/access` | **P2 done** — CRUD, atomic seats, revoke/renew/suspend/expire, utilization, audited reveal, 32 API tests |
 | 10 | Exit / offboarding | `modules/exit` | **P3 done** — lifecycle, checklist, clearances, guarded relieve, force-relieve, 24 API tests |
-| 11 | Reports (11 reports, CSV/XLSX) | `modules/reports` | P7 |
-| 12 | Notifications / reminders | `modules/notifications`, `jobs` | P7 |
-| 14 | Employee lifecycle across all modules | employees + connected modules | P1–P8 |
+| 11 | Reports (11 reports, CSV/XLSX) | `modules/reports` | **P7 done** — JSON/CSV/XLSX, per-report RBAC, Redis-backed BullMQ large exports, 12 API tests + export store unit tests |
+| 12 | Notifications / reminders | `modules/notifications`, `jobs` | **P7 done** — inbox, unread badge, dedupe keys, 08:00 reminders, Nodemailer + dev transport, 12 API tests |
+| 14 | Employee lifecycle across all modules | employees + connected modules | **P1–P7 done** — Employee 360 connects overview, documents, attendance, leave, assets, software/access, employment history and exit; P8 (E2E/hardening) intentionally not started |
 
 Modules not yet implemented are absent from `apps/api/src/modules/` rather than
 stubbed, so nothing can accidentally depend on non-existent behaviour.
@@ -444,8 +455,8 @@ stubbed, so nothing can accidentally depend on non-existent behaviour.
 | **P3** | exit, checklist, clearances, relieve guard, force-relieve | complete — backend, 24 API tests, frontend, verified |
 | **P4** | documents, secure serving, versions, PDF templates | complete — backend, 17 API tests, frontend, verified |
 | **P5** | attendance, corrections, leave, balances, nightly jobs | complete — backend, 34 API tests, frontend, verified |
-| P6 | recruitment, candidates, onboarding | not started |
-| P7 | reports, exports, notifications, BullMQ reminders | not started |
+| P6 | recruitment, candidates, onboarding | complete — backend (jobs, candidates, conversion, onboarding lifecycle), 29 API tests, frontend, verified |
+| P7 | reports, exports, notifications, BullMQ reminders | complete — backend, 28 API/unit tests, frontend, verified |
 | P8 | hardening, Playwright E2E, OpenAPI, docs | not started |
 
 ---

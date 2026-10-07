@@ -27,5 +27,14 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     chunkSizeWarningLimit: 900,
+    // AGENTS.md §9 — `/assets` is a required React route (the asset
+    // inventory). Vite's default output directory is also `dist/assets`,
+    // so a production build made the SPA route collide with the hashed
+    // bundle directory: nginx resolved `/assets/` to the real folder and
+    // every inventory deep link (`/assets/AST-0001`, `/assets/new`, …)
+    // answered 404 while `/assets` issued a directory redirect to a
+    // port-less URL. Emitting bundles under `dist/static/` keeps the whole
+    // `/assets/*` namespace free for client-side routing.
+    assetsDir: 'static',
   },
 });
