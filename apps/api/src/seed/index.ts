@@ -18,6 +18,10 @@ import { LeaveType } from '../modules/leave/leave-type.model';
 import { LeaveBalance } from '../modules/leave/leave-balance.model';
 import { LeaveRequest } from '../modules/leave/leave-request.model';
 import { Exit } from '../modules/exit/exit.model';
+import { Job } from '../modules/recruitment/job.model';
+import { Candidate } from '../modules/recruitment/candidate.model';
+import { Onboarding } from '../modules/onboarding/onboarding.model';
+import { createOnboardingForEmployee } from '../modules/onboarding/onboarding.service';
 import { initiateExit } from '../modules/exit/exit.service';
 import { initializeEmployeeBalances } from '../modules/leave/leave-balance.service';
 import { isWeekend } from '../utils/dates';
@@ -35,6 +39,8 @@ import {
   HOLIDAYS,
   LEAVE_TYPES,
   LICENSES,
+  SEED_CANDIDATES,
+  SEED_JOBS,
   type SeedEmployee,
 } from './data';
 
@@ -45,6 +51,9 @@ export interface SeedResult {
   assets: number;
   licenses: number;
   accessItems: number;
+  jobs: number;
+  candidates: number;
+  onboardings: number;
 }
 
 /**
@@ -91,6 +100,9 @@ const clearCollections = async (): Promise<void> => {
     LeaveBalance.deleteMany({}),
     LeaveRequest.deleteMany({}),
     Exit.deleteMany({}),
+    Job.deleteMany({}),
+    Candidate.deleteMany({}),
+    Onboarding.deleteMany({}),
     // Reset the counters so codes restart at 0001 and stay deterministic.
     Counter.deleteMany({}),
   ]);
@@ -232,6 +244,47 @@ export async function runSeed({ reset = true }: { reset?: boolean } = {}): Promi
     await initializeEmployeeBalances(emp._id, emp.dateOfJoining, emp.employmentType);
   }
 
+  // --- Onboarding Checklists (§7, §8.4, §12) ---
+  for (const emp of allEmployees) {
+    const onb = await createOnboardingForEmployee(emp);
+    if (emp.status === 'Active' && emp.dateOfJoining < '2024-01-01') {
+      for (const item of onb.items) {
+        item.status = 'Completed';
+        item.completedAt = new Date(emp.dateOfJoining);
+        item.completedSource = 'Manual';
+      }
+      await Onboarding.updateOne(
+        { _id: onb._id },
+        {
+          $set: {
+            status: 'Completed',
+            completedAt: new Date(emp.dateOfJoining),
+            items: onb.items,
+          },
+        },
+      ).exec();
+    } else if (emp.status === 'Probation' || emp.dateOfJoining >= '2025-01-01') {
+      const itemsToComplete = ['personalInfo', 'offerLetter', 'agreementNda', 'companyEmailAccount'];
+      for (const item of onb.items) {
+        if (itemsToComplete.includes(item.key)) {
+          item.status = 'Completed';
+          item.completedAt = new Date();
+          item.completedSource = 'Manual';
+        }
+      }
+      await Onboarding.updateOne(
+        { _id: onb._id },
+        {
+          $set: {
+            status: 'In Progress',
+            startedAt: new Date(emp.dateOfJoining),
+            items: onb.items,
+          },
+        },
+      ).exec();
+    }
+  }
+
   // --- Attendance for last 30 days (§8.5, §12) ---
   const holidayDates = new Set(HOLIDAYS.map((h) => h.date));
   const now = new Date();
@@ -281,12 +334,17 @@ export async function runSeed({ reset = true }: { reset?: boolean } = {}): Promi
     await Attendance.insertMany(attendanceBatch);
   }
 
+  const p2 = await seedP2Fixtures(employeeIdByKey);
+  await seedExitFixtures(employeeIdByKey);
+  const p6 = await seedP6Fixtures(employeeIdByKey, departmentIdByName);
+
   return {
     departments: departmentDocs.length,
     employees: ordered.length,
     users: DEMO_USERS.length,
-    ...(await seedP2Fixtures(employeeIdByKey)),
-    ...(await seedExitFixtures(employeeIdByKey)),
+    ...p2,
+    ...p6,
+    onboardings: allEmployees.length,
   };
 }
 
@@ -556,6 +614,117 @@ async function seedP2Fixtures(
     assets: ASSETS.length,
     licenses: LICENSES.length,
     accessItems: ACCESS_ITEMS.length,
+  };
+}
+
+/** P6 fixtures: Jobs and Candidates (§7, §8.3, §12) */
+async function seedP6Fixtures(
+  employeeIdByKey: Map<string, Types.ObjectId>,
+  departmentIdByName: Map<string, Types.ObjectId>,
+): Promise<Pick<SeedResult, 'jobs' | 'candidates'>> {
+  // --- Jobs (§7, §8.3, §12) ---
+  const jobIdByKey = new Map<string, Types.ObjectId>();
+  for (const seedJob of SEED_JOBS) {
+    const departmentId = departmentIdByName.get(seedJob.department);
+    if (!departmentId) {
+      throw new Error(`Seed job "${seedJob.title}" references unknown department "${seedJob.department}"`);
+    }
+    const hiringManagerId = employeeIdByKey.get(seedJob.hiringManagerKey);
+    if (!hiringManagerId) {
+      throw new Error(`Seed job "${seedJob.title}" references unknown manager "${seedJob.hiringManagerKey}"`);
+    }
+
+    const jobCode = await nextHumanId('job');
+    const createdJob = await Job.create({
+      jobCode,
+      title: seedJob.title,
+      departmentId,
+      hiringManagerId,
+      openings: seedJob.openings,
+      filledCount: seedJob.filledCount,
+      description: seedJob.description,
+      requiredSkills: seedJob.requiredSkills,
+      openingDate: seedJob.openingDate,
+      closingDate: seedJob.closingDate ?? null,
+      status: seedJob.status,
+      createdBy: null,
+      isDeleted: false,
+    });
+    jobIdByKey.set(seedJob.key, createdJob._id);
+  }
+
+  // --- Candidates (§7, §8.3, §12) ---
+  for (const seedCand of SEED_CANDIDATES) {
+    const jobId = jobIdByKey.get(seedCand.jobKey);
+    if (!jobId) {
+      throw new Error(`Seed candidate "${seedCand.name}" references unknown job "${seedCand.jobKey}"`);
+    }
+
+    const candidateCode = await nextHumanId('candidate');
+    const convertedEmployeeId = seedCand.convertedEmployeeKey
+      ? employeeIdByKey.get(seedCand.convertedEmployeeKey) ?? null
+      : null;
+
+    const interviews = (seedCand.interviews ?? []).map((iv) => {
+      const interviewerId = employeeIdByKey.get(iv.interviewerKey);
+      if (!interviewerId) {
+        throw new Error(`Seed candidate interview references unknown interviewer "${iv.interviewerKey}"`);
+      }
+      return {
+        round: iv.round,
+        title: iv.title,
+        interviewerId,
+        scheduledAt: new Date(iv.scheduledAt),
+        status: iv.status,
+        feedback: iv.feedback ?? null,
+        rating: iv.rating ?? null,
+        completedAt: iv.completedAt ? new Date(iv.completedAt) : null,
+      };
+    });
+
+    const stageHistory = [
+      {
+        stage: 'Applied' as const,
+        changedAt: new Date('2026-01-20T10:00:00.000Z'),
+        changedBy: null,
+        note: `Application received via ${seedCand.source}`,
+      },
+    ];
+    if (seedCand.stage !== 'Applied') {
+      stageHistory.push({
+        stage: seedCand.stage as any,
+        changedAt: new Date('2026-02-01T10:00:00.000Z'),
+        changedBy: null,
+        note: `Moved to ${seedCand.stage}`,
+      });
+    }
+
+    await Candidate.create({
+      candidateCode,
+      name: seedCand.name,
+      email: seedCand.email,
+      phone: seedCand.phone,
+      resumeFile: null,
+      jobId,
+      source: seedCand.source,
+      stage: seedCand.stage,
+      interviews,
+      selectionStatus:
+        seedCand.selectionStatus ??
+        (seedCand.stage === 'Selected' ? 'Selected' : seedCand.stage === 'Rejected' ? 'Rejected' : 'Pending'),
+      offerStatus: seedCand.offerStatus ?? 'Pending',
+      joiningDate: seedCand.joiningDate ?? null,
+      stageHistory,
+      rejectionReason: seedCand.rejectionReason ?? null,
+      convertedEmployeeId,
+      createdBy: null,
+      isDeleted: false,
+    });
+  }
+
+  return {
+    jobs: SEED_JOBS.length,
+    candidates: SEED_CANDIDATES.length,
   };
 }
 

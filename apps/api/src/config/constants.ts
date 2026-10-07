@@ -32,6 +32,14 @@ export const PERMISSIONS = {
   manageDocumentTemplates: 'manageDocumentTemplates',
   manageLeaveTypes: 'manageLeaveTypes',
   manageAttendance: 'manageAttendance',
+  manageJobs: 'manageJobs',
+  deleteJob: 'deleteJob',
+  manageCandidates: 'manageCandidates',
+  deleteCandidate: 'deleteCandidate',
+  viewRecruitment: 'viewRecruitment',
+  addInterviewFeedback: 'addInterviewFeedback',
+  manageOnboarding: 'manageOnboarding',
+  viewOnboarding: 'viewOnboarding',
 } as const;
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
@@ -62,11 +70,20 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     PERMISSIONS.manageLicenses,
     PERMISSIONS.manageDocuments,
     PERMISSIONS.manageAttendance,
+    PERMISSIONS.manageJobs,
+    PERMISSIONS.manageCandidates,
+    PERMISSIONS.viewRecruitment,
+    PERMISSIONS.addInterviewFeedback,
+    PERMISSIONS.manageOnboarding,
+    PERMISSIONS.viewOnboarding,
   ],
   Manager: [
     PERMISSIONS.approveTeamLeave,
     PERMISSIONS.approveAttendanceCorrection,
     PERMISSIONS.provideManagerClearance,
+    PERMISSIONS.viewRecruitment,
+    PERMISSIONS.addInterviewFeedback,
+    PERMISSIONS.viewOnboarding,
   ],
   Employee: [],
 };
@@ -166,6 +183,89 @@ export type AttendanceCorrectionStatus = (typeof ATTENDANCE_CORRECTION_STATUSES)
 /** AGENTS.md §7 — Leave request status. */
 export const LEAVE_REQUEST_STATUSES = ['Pending', 'Approved', 'Rejected', 'Cancelled'] as const;
 export type LeaveRequestStatus = (typeof LEAVE_REQUEST_STATUSES)[number];
+
+/** AGENTS.md §7 — Job statuses. */
+export const JOB_STATUSES = ['Draft', 'Open', 'On Hold', 'Closed', 'Filled'] as const;
+export type JobStatus = (typeof JOB_STATUSES)[number];
+
+/** AGENTS.md §7 — Candidate sources. */
+export const CANDIDATE_SOURCES = ['LinkedIn', 'Referral', 'Website', 'Agency', 'Other'] as const;
+export type CandidateSource = (typeof CANDIDATE_SOURCES)[number];
+
+/** AGENTS.md §7 — Candidate stages. */
+export const CANDIDATE_STAGES = [
+  'Applied',
+  'Shortlisted',
+  'Interview',
+  'Selected',
+  'Rejected',
+  'Offer',
+  'Joined',
+] as const;
+export type CandidateStage = (typeof CANDIDATE_STAGES)[number];
+
+/** AGENTS.md §7 — Candidate selection statuses. */
+export const SELECTION_STATUSES = ['Pending', 'Selected', 'Rejected'] as const;
+export type SelectionStatus = (typeof SELECTION_STATUSES)[number];
+
+/** AGENTS.md §7 — Candidate offer statuses. */
+export const OFFER_STATUSES = ['Pending', 'Sent', 'Accepted', 'Declined'] as const;
+export type OfferStatus = (typeof OFFER_STATUSES)[number];
+
+/** AGENTS.md §7 — Interview statuses. */
+export const INTERVIEW_STATUSES = ['Scheduled', 'Completed', 'Cancelled'] as const;
+export type InterviewStatus = (typeof INTERVIEW_STATUSES)[number];
+
+/** AGENTS.md §7 — Onboarding checklist overall status. */
+export const ONBOARDING_STATUSES = ['Not Started', 'In Progress', 'Completed'] as const;
+export type OnboardingStatus = (typeof ONBOARDING_STATUSES)[number];
+
+/** AGENTS.md §7 — Onboarding item status. */
+export const CHECKLIST_ITEM_STATUSES = ['Pending', 'Completed', 'NA'] as const;
+export type ChecklistItemStatus = (typeof CHECKLIST_ITEM_STATUSES)[number];
+
+/** AGENTS.md §7 — 14 mandatory onboarding checklist items. */
+export const ONBOARDING_ITEM_KEYS = [
+  'personalInfo',
+  'identityDocs',
+  'educationalDocs',
+  'offerLetter',
+  'agreementNda',
+  'bankInfo',
+  'taxInfo',
+  'departmentAssignment',
+  'managerAssignment',
+  'companyEmailAccount',
+  'hardwareAssignment',
+  'softwareLicenseAssignment',
+  'orientation',
+  'policyAcknowledgement',
+] as const;
+export type OnboardingItemKey = (typeof ONBOARDING_ITEM_KEYS)[number];
+
+export interface OnboardingItemMeta {
+  key: OnboardingItemKey;
+  title: string;
+  category: 'profile' | 'documents' | 'access' | 'equipment' | 'orientation';
+  isRequired: boolean;
+}
+
+export const ONBOARDING_ITEM_DEFINITIONS: readonly OnboardingItemMeta[] = [
+  { key: 'personalInfo', title: 'Personal information', category: 'profile', isRequired: true },
+  { key: 'identityDocs', title: 'Identity documents', category: 'documents', isRequired: true },
+  { key: 'educationalDocs', title: 'Educational documents', category: 'documents', isRequired: true },
+  { key: 'offerLetter', title: 'Offer letter', category: 'documents', isRequired: true },
+  { key: 'agreementNda', title: 'Agreement/NDA', category: 'documents', isRequired: true },
+  { key: 'bankInfo', title: 'Bank information', category: 'profile', isRequired: true },
+  { key: 'taxInfo', title: 'Tax information', category: 'profile', isRequired: true },
+  { key: 'departmentAssignment', title: 'Department assignment', category: 'profile', isRequired: true },
+  { key: 'managerAssignment', title: 'Manager assignment', category: 'profile', isRequired: true },
+  { key: 'companyEmailAccount', title: 'Company email/account', category: 'access', isRequired: true },
+  { key: 'hardwareAssignment', title: 'Hardware assignment', category: 'equipment', isRequired: true },
+  { key: 'softwareLicenseAssignment', title: 'Software/license assignment', category: 'access', isRequired: true },
+  { key: 'orientation', title: 'Orientation', category: 'orientation', isRequired: true },
+  { key: 'policyAcknowledgement', title: 'Policy acknowledgement', category: 'orientation', isRequired: true },
+];
 
 /** AGENTS.md §7 — A human-readable ID prefix per entity. */
 export const ID_PREFIXES = {

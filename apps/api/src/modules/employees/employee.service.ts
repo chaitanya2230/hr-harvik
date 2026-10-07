@@ -15,6 +15,7 @@ import { recordAudit } from '../audit/audit.service';
 import { collectTeamIds } from './employee.scope';
 import { invalidateDashboardCache } from '../dashboard/dashboard.cache';
 import { initializeEmployeeBalances } from '../leave/leave-balance.service';
+import { createOnboardingForEmployee, syncOnboardingForEmployee } from '../onboarding/onboarding.service';
 import { buildPagination, buildSort, listMeta, type Pagination } from '../../utils/http';
 import { decryptField, encryptField } from '../../utils/crypto';
 import { trustedFilter } from '../../utils/mongo';
@@ -600,6 +601,9 @@ export async function createEmployee(body: CreateEmployeeBody, ctx: EmployeeCont
   // §8.2 — "Creating employee auto-creates leave balances."
   await initializeEmployeeBalances(created._id, created.dateOfJoining, created.employmentType);
 
+  // §8.2 — "Creating employee auto-creates onboarding checklist."
+  await createOnboardingForEmployee(created);
+
   await recordAudit({
     ...ctx,
     actorId: ctx.account.userId,
@@ -723,6 +727,8 @@ export async function updateEmployee(
   // §8.2 — "Employee code remains unchanged." Deliberately never written here.
 
   await existing.save();
+
+  await syncOnboardingForEmployee(employeeId);
 
   await recordAudit({
     ...ctx,

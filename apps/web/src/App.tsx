@@ -23,6 +23,14 @@ import { ExitDetailPage } from './features/exit/ExitDetailPage';
 import { DocumentListPage } from './features/documents/DocumentListPage';
 import { AttendancePage } from './features/attendance/AttendancePage';
 import { LeavePage } from './features/leave/LeavePage';
+import { JobListPage } from './features/recruitment/JobListPage';
+import { JobDetailPage } from './features/recruitment/JobDetailPage';
+import { JobForm } from './features/recruitment/JobForm';
+import { CandidateListPage } from './features/recruitment/CandidateListPage';
+import { CandidateDetailPage } from './features/recruitment/CandidateDetailPage';
+import { CandidateForm } from './features/recruitment/CandidateForm';
+import { OnboardingListPage } from './features/onboarding/OnboardingListPage';
+import { OnboardingDetailPage } from './features/onboarding/OnboardingDetailPage';
 
 /**
  * AGENTS.md §9 — P1 routes.
@@ -159,6 +167,60 @@ export function App() {
             {/* P5 — Attendance & Leave (AGENTS.md §8.5, §8.6, §9) */}
             <Route path="attendance" element={<AttendancePage />} />
             <Route path="leave" element={<LeavePage />} />
+
+            {/* P6 — Recruitment (AGENTS.md §8.3, §9) */}
+            <Route
+              path="recruitment/jobs"
+              element={
+                <RequirePermission permission="viewRecruitment">
+                  <JobListPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="recruitment/jobs/new"
+              element={
+                <RequirePermission permission="manageJobs">
+                  <JobForm />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="recruitment/jobs/:id"
+              element={
+                <RequirePermission permission="viewRecruitment">
+                  <JobDetailPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="recruitment/candidates"
+              element={
+                <RequirePermission permission="viewRecruitment">
+                  <CandidateListPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="recruitment/candidates/new"
+              element={
+                <RequirePermission permission="manageCandidates">
+                  <CandidateForm />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="recruitment/candidates/:id"
+              element={
+                <RequirePermission permission="viewRecruitment">
+                  <CandidateDetailPage />
+                </RequirePermission>
+              }
+            />
+
+            {/* P6 — Onboarding (AGENTS.md §8.4, §9) */}
+            <Route path="onboarding" element={<OnboardingListPage />} />
+            <Route path="onboarding/:employeeId" element={<OnboardingDetailPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

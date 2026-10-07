@@ -680,6 +680,54 @@ seed entries.
 - `GET /attendance` validates an optional `month` as `YYYY-MM` before it
   reaches the anchored `$regex` filter, closing a hostile-pattern injection.
 
+## D-41 — Candidate-to-employee conversion in atomic replica-set transaction
+
+*Status: accepted · P6*
+
+AGENTS.md §8.3 & Section 16 Phase P6 mandate atomic conversion:
+- Candidate → Employee profile
+- Initial Leave balances initialized
+- Exactly 14-item Onboarding checklist generated
+- Candidate `convertedEmployeeId` set and stage transitioned to `Joined`
+- Job `filledCount` incremented atomically, transitioning to `Filled` when openings are reached
+- Optional User login created
+- Comprehensive AuditLog records written
+
+All operations execute inside a single MongoDB session transaction with `withTransaction()`. If any step fails or if another concurrent conversion takes the final job opening, all operations roll back together cleanly.
+
+## D-42 — Concurrency protection on job openings & duplicate candidate guards
+
+*Status: accepted · P6*
+
+- To prevent race conditions where concurrent candidate conversions consume the same opening, job opening consumption uses optimistic concurrency control guarded by checking `filledCount < openings` and conditionally updating `filledCount`. Losers observe HTTP 409 Conflict without corrupting job fill state.
+- Candidate creation validates email uniqueness within open candidates (`stage !== 'Rejected'`) for the same job requisition, throwing 409 Conflict on duplicate applications while allowing re-application to different requisitions or after prior rejections.
+
+## D-43 — 14-item onboarding lifecycle, cross-domain auto-completion events & self-service authorization
+
+*Status: accepted · P6*
+
+- Implemented exactly the 14 mandatory checklist items mandated by AGENTS.md §7.
+- Overall status machine strictly adheres to: `Not Started` (0 items done) → `In Progress` (1 to 13 items done) → `Completed` (all 14 items done, or required items done with non-applicable items accompanied by mandatory justification).
+- Added domain listener hooks (`onAssetAssigned`, `onLicenseAssigned`, user creation) so domain writes automatically advance corresponding checklist items (`hardwareAssignment`, `softwareLicenseAssignment`, `companyEmailAccount`) without manual intervention.
+- Role-based self-service access: while the system-wide onboarding list is restricted to HR Admin/Manager/Hiring Manager, employees can access and update their own onboarding records (`/onboarding/:employeeId`) for allowed self-service items (`personalInfo`, `policyAcknowledgement`).
+
+## D-44 — Secure resume storage, magic bytes validation and authenticated streaming
+
+*Status: accepted · P6*
+
+- Resume files are restricted to PDF, DOC, and DOCX and capped at 10 MB.
+- Magic bytes and MIME signatures are validated on upload (`validateResumeFile`).
+- Files are saved with cryptographically random UUID filenames under `UPLOAD_DIR/resumes/` and never exposed via public static directories.
+- Download endpoint streams authenticated files with `Content-Disposition: attachment; filename="<sanitized>"`, `X-Content-Type-Options: nosniff`, and strictly enforces recruitment RBAC.
+
+## D-45 — P6 Seed data expansion: 5 jobs, 15 candidates across stages, and 25 realistic employee onboardings
+
+*Status: accepted · P6*
+
+- Seeded 5 realistic job requisitions (Open, Filled, Draft, On Hold) with departmental and hiring-manager links.
+- Seeded 15 candidates spanning all pipeline stages: Applied, Shortlisted, Interview (with scheduled/completed rounds, feedback, and 1–5 ratings), Selected, Offer (Sent/Accepted/Declined), Joined (linked to converted employees), and Rejected (with rejection reasons).
+- Seeded onboarding records for all 25 employees with realistic status distributions based on tenure and status (Completed for long-term employees, In Progress for probation/new joiners).
+
 ---
 
 ## Known gaps carried into later phases

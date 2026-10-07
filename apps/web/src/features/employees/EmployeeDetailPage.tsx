@@ -117,6 +117,12 @@ export function EmployeeDetailPage() {
         subtitle={`${employee.employeeCode} · ${employee.email}`}
         actions={
           <>
+            <Link
+              to={`/onboarding/${employee.id}`}
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Onboarding
+            </Link>
             {canEdit ? (
               <Link
                 to={`/employees/${employee.id}/edit`}

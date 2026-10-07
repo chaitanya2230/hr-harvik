@@ -13,6 +13,7 @@ import { cacheGetJson, cacheSetJson } from '../../utils/cache';
 import { trustedFilter } from '../../utils/mongo';
 import { addDaysIso, todayInTimeZone } from '../../utils/dates';
 import { dashboardCacheKey, DASHBOARD_CACHE_TTL } from './dashboard.cache';
+import { getPendingOnboardingCount } from '../onboarding/onboarding.service';
 import type { AuthAccount } from '../auth/auth.service';
 
 /**
@@ -125,17 +126,15 @@ const chip = (doc: {
  */
 const QUICK_ACTIONS: QuickAction[] = [
   { key: 'addEmployee', label: 'Add Employee', href: '/employees/new', enabled: true },
-  { key: 'addCandidate', label: 'Add Candidate', href: '/recruitment/candidates/new', enabled: false, phase: 'P6' },
-  { key: 'startOnboarding', label: 'Start Onboarding', href: '/onboarding', enabled: false, phase: 'P6' },
+  { key: 'addCandidate', label: 'Add Candidate', href: '/recruitment/candidates', enabled: true },
+  { key: 'startOnboarding', label: 'Start Onboarding', href: '/onboarding', enabled: true },
   { key: 'generateDocument', label: 'Generate Document', href: '/documents', enabled: true },
   { key: 'assignAsset', label: 'Assign Asset', href: '/assets', enabled: true },
   { key: 'assignLicense', label: 'Assign Software License', href: '/licenses', enabled: true },
   { key: 'processExit', label: 'Process Exit', href: '/exit', enabled: true },
 ];
 
-const UNAVAILABLE: DashboardUnavailable[] = [
-  { metric: 'pendingOnboarding', phase: 'P6', reason: 'Requires the Onboarding collection.' },
-];
+const UNAVAILABLE: DashboardUnavailable[] = [];
 
 export async function buildDashboardSummary(account: AuthAccount): Promise<DashboardSummary> {
   const visibleIds = await scopeIdsFor(account);
@@ -191,10 +190,10 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
     isDeleted: false,
     actualReturnDate: null,
     ...scopeEmployeeFilter,
-    $or: [
+    $or: trustedFilter([
       { expectedReturnDate: trustedFilter({ $lt: today }) },
       { employeeId: noticeIdFilter },
-    ],
+    ]),
   }).exec();
 
   const pendingLicenseRevocations =
@@ -302,6 +301,8 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
     }),
   ]);
 
+  const pendingOnboarding = await getPendingOnboardingCount(account);
+
   return {
     scope: {
       kind: scopeKind,
@@ -328,10 +329,11 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
           pendingLicenseRevocations +
           pendingDocumentGeneration +
           pendingLeaveApprovals +
-          pendingAttendanceCorrections,
+          pendingAttendanceCorrections +
+          pendingOnboarding,
         phase: null,
       },
-      pendingOnboarding: null,
+      pendingOnboarding,
       pendingDocumentGeneration,
       pendingAssetReturns,
       pendingLicenseRevocations,
@@ -347,7 +349,7 @@ export async function buildDashboardSummary(account: AuthAccount): Promise<Dashb
       leavingSoon: '#leaving-soon',
       recentlyJoined: '#recently-joined',
       pendingHrActions: null,
-      pendingOnboarding: null,
+      pendingOnboarding: '/onboarding',
       pendingDocumentGeneration: '/documents',
       pendingAssetReturns: '/assets/assignments?active=true',
       pendingLicenseRevocations: '/licenses/assignments?status=Assigned',

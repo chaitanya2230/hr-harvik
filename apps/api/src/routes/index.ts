@@ -10,6 +10,8 @@ import { exitRouter } from '../modules/exit/exit.routes';
 import { documentRouter, documentTemplateRouter } from '../modules/documents/document.routes';
 import attendanceRouter from '../modules/attendance/attendance.routes';
 import leaveRouter from '../modules/leave/leave.routes';
+import { recruitmentRouter } from '../modules/recruitment/recruitment.routes';
+import { onboardingRouter } from '../modules/onboarding/onboarding.routes';
 
 /**
  * AGENTS.md §10 — every endpoint lives under the `/api/v1` prefix.
@@ -20,8 +22,8 @@ import leaveRouter from '../modules/leave/leave.routes';
  *   P2 assets, licenses, access
  *   P3 exit
  *   P4 documents
- *   P5 attendance, leave                           <- registered
- *   P6 recruitment, onboarding
+ *   P5 attendance, leave
+ *   P6 recruitment, onboarding                    <- registered
  *   P7 reports, notifications
  */
 export const apiRouter = Router();
@@ -38,4 +40,6 @@ apiRouter.use('/documents', documentRouter);
 apiRouter.use('/document-templates', documentTemplateRouter);
 apiRouter.use('/attendance', attendanceRouter);
 apiRouter.use('/leave', leaveRouter);
+apiRouter.use('/recruitment', recruitmentRouter);
+apiRouter.use('/onboarding', onboardingRouter);
 

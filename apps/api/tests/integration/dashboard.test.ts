@@ -72,10 +72,10 @@ describe('dashboard summary (§8.1)', () => {
     expect(metrics.fullTime).toBeGreaterThan(0);
     expect(scope.kind).toBe('organisation');
 
-    // P5 introduces real onLeave metric; only pendingOnboarding remains unavailable (P6).
+    // P6 introduces real pendingOnboarding metric; all 14 metrics are now available.
     expect(typeof metrics.onLeave).toBe('number');
-    expect(metrics.pendingOnboarding).toBeNull();
-    expect(unavailable.length).toBe(1);
+    expect(typeof metrics.pendingOnboarding).toBe('number');
+    expect(unavailable.length).toBe(0);
 
     // P2 & P4 metrics are real numbers recomputed from their collections.
     expect(typeof metrics.pendingAssetReturns).toBe('number');
@@ -121,7 +121,8 @@ describe('dashboard summary (§8.1)', () => {
     expect(links.pendingLicenseRevocations).toBe('/licenses/assignments?status=Assigned');
     // P5 introduces /leave link for onLeave
     expect(links.onLeave).toBe('/leave');
-    expect(links.pendingOnboarding).toBeNull();
+    // P6 introduces /onboarding link for pendingOnboarding
+    expect(links.pendingOnboarding).toBe('/onboarding');
     expect(links.pendingDocumentGeneration).toBe('/documents');
   });
 

@@ -184,6 +184,41 @@ async function emitLicenseRevoked(event: LicenseRevokedEvent): Promise<void> {
   }
 }
 
+export interface LicenseAssignedEvent {
+  licenseId: string;
+  employeeId: string;
+  assignmentId: string;
+  actorId: string;
+}
+
+export type LicenseAssignedListener = (event: LicenseAssignedEvent) => Promise<void> | void;
+
+function getLicenseAssignedListeners(): LicenseAssignedListener[] {
+  const g = globalThis as unknown as { __licenseAssignedListeners?: LicenseAssignedListener[] };
+  if (!g.__licenseAssignedListeners) g.__licenseAssignedListeners = [];
+  return g.__licenseAssignedListeners;
+}
+
+export function onLicenseAssigned(listener: LicenseAssignedListener): () => void {
+  const listeners = getLicenseAssignedListeners();
+  listeners.push(listener);
+  return () => {
+    const index = listeners.indexOf(listener);
+    if (index >= 0) listeners.splice(index, 1);
+  };
+}
+
+async function emitLicenseAssigned(event: LicenseAssignedEvent): Promise<void> {
+  const listeners = getLicenseAssignedListeners();
+  for (const listener of listeners) {
+    try {
+      await listener(event);
+    } catch {
+      // Subscriber failures never roll back
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Guards
 // ---------------------------------------------------------------------------
@@ -594,6 +629,14 @@ export async function assignLicense(
     entityId: assignmentId,
     after: { licenseId: id, employeeId: body.employeeId },
   });
+
+  await emitLicenseAssigned({
+    licenseId: id,
+    employeeId: body.employeeId,
+    assignmentId: assignmentId.toString(),
+    actorId: ctx.account.userId,
+  });
+
   await invalidateDashboardCache();
 
   const row = await LicenseAssignment.findById(assignmentId)

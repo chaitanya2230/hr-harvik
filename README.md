@@ -3,7 +3,7 @@
 Internal HR system for [Harvik Technologies](https://harviktech.com/), built
 against [`AGENTS.md`](./AGENTS.md).
 
-> **Phase status: P0 → P5 complete.**
+> **Phase status: P0 → P6 complete.**
 > Shipped so far: repository structure, MongoDB 7 replica set, Redis 7 + BullMQ,
 > Express API, JWT auth with refresh rotation, RBAC, audit logging, field-level
 > encryption, seed data, employees, Employee 360, dashboard, assets, licenses,
@@ -11,8 +11,11 @@ against [`AGENTS.md`](./AGENTS.md).
 > documents, secure file streaming, versioning lineage, templates, PDFKit PDF generation,
 > exit document linkage, attendance ledger, attendance corrections, holiday management,
 > nightly BullMQ attendance reconciliation job, configurable leave types, pro-rated leave balances,
-> atomic overdraft-safe leave requests, and the automated test suite (347 tests passing).
-> Not yet built: recruitment, onboarding, reports, notifications.
+> atomic overdraft-safe leave requests, recruitment job requisitions, candidate pipeline state machine,
+> interview rounds & feedback ratings, offer management, secure resume storage & authenticated streaming,
+> atomic candidate-to-employee conversion transaction, 14-item onboarding checklists, smart links,
+> cross-domain auto-completion events, and the automated test suite (392 tests passing).
+> Not yet built: reports, notifications.
 > Nothing in the UI displays invented data — there are no placeholder metrics.
 
 ---

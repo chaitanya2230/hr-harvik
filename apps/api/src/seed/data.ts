@@ -690,4 +690,282 @@ export const HOLIDAYS = [
   { date: `${currentYear}-10-02`, name: 'Gandhi Jayanti' },
   { date: `${currentYear}-11-01`, name: 'Diwali' },
   { date: `${currentYear}-12-25`, name: 'Christmas Day' },
+];
+
+export interface SeedJob {
+  key: string;
+  title: string;
+  department: (typeof DEPARTMENTS)[number];
+  hiringManagerKey: string;
+  openings: number;
+  filledCount: number;
+  description: string;
+  requiredSkills: string[];
+  openingDate: string;
+  closingDate?: string | null;
+  status: 'Draft' | 'Open' | 'On Hold' | 'Closed' | 'Filled';
+}
+
+export interface SeedCandidateInterview {
+  round: number;
+  title: string;
+  interviewerKey: string;
+  scheduledAt: string;
+  status: 'Scheduled' | 'Completed' | 'Cancelled';
+  feedback?: string | null;
+  rating?: number | null;
+  completedAt?: string | null;
+}
+
+export interface SeedCandidate {
+  name: string;
+  email: string;
+  phone: string;
+  jobKey: string;
+  source: 'LinkedIn' | 'Referral' | 'Website' | 'Agency' | 'Other';
+  stage: 'Applied' | 'Shortlisted' | 'Interview' | 'Selected' | 'Offer' | 'Joined' | 'Rejected';
+  selectionStatus?: 'Pending' | 'Selected' | 'Rejected';
+  offerStatus?: 'Pending' | 'Sent' | 'Accepted' | 'Declined';
+  joiningDate?: string | null;
+  rejectionReason?: string | null;
+  convertedEmployeeKey?: string | null;
+  interviews?: SeedCandidateInterview[];
+}
+
+export const SEED_JOBS: readonly SeedJob[] = [
+  {
+    key: 'senior-fullstack',
+    title: 'Senior Full Stack Engineer',
+    department: 'Engineering',
+    hiringManagerKey: 'ananya',
+    openings: 3,
+    filledCount: 1,
+    description: 'Looking for an experienced engineer with deep expertise in React, Node.js, and distributed MongoDB environments.',
+    requiredSkills: ['React', 'Node.js', 'TypeScript', 'MongoDB'],
+    openingDate: '2026-01-15',
+    status: 'Open',
+  },
+  {
+    key: 'product-designer',
+    title: 'Product Designer (UI/UX)',
+    department: 'Design',
+    hiringManagerKey: 'ananya',
+    openings: 1,
+    filledCount: 0,
+    description: 'Lead end-to-end user experience and interface architecture for core web application suites.',
+    requiredSkills: ['Figma', 'Design Systems', 'User Research', 'Wireframing'],
+    openingDate: '2026-02-01',
+    status: 'Open',
+  },
+  {
+    key: 'devops-engineer',
+    title: 'DevOps & Cloud Engineer',
+    department: 'Engineering',
+    hiringManagerKey: 'ananya',
+    openings: 1,
+    filledCount: 1,
+    description: 'Own CI/CD pipelines, container orchestration, Docker deployments, and AWS cloud reliability.',
+    requiredSkills: ['Docker', 'Kubernetes', 'AWS', 'Terraform', 'CI/CD'],
+    openingDate: '2025-11-01',
+    closingDate: '2026-01-20',
+    status: 'Filled',
+  },
+  {
+    key: 'technical-recruiter',
+    title: 'Technical Talent Specialist',
+    department: 'HR',
+    hiringManagerKey: 'meera',
+    openings: 1,
+    filledCount: 0,
+    description: 'Manage full-cycle tech recruitment pipeline across engineering, product, and leadership functions.',
+    requiredSkills: ['Technical Sourcing', 'LinkedIn Recruiter', 'Interview Coordination'],
+    openingDate: '2026-03-01',
+    status: 'Draft',
+  },
+  {
+    key: 'growth-marketing',
+    title: 'Growth Marketing Specialist',
+    department: 'Sales',
+    hiringManagerKey: 'ananya',
+    openings: 2,
+    filledCount: 0,
+    description: 'Drive organic and paid user acquisition, technical SEO, and conversion optimization.',
+    requiredSkills: ['SEO', 'Google Analytics', 'Content Strategy', 'B2B Marketing'],
+    openingDate: '2026-01-20',
+    status: 'On Hold',
+  },
+];
+
+export const SEED_CANDIDATES: readonly SeedCandidate[] = [
+  {
+    name: 'Aarav Sharma',
+    email: 'aarav.sharma@example.com',
+    phone: '+91 99000 11001',
+    jobKey: 'senior-fullstack',
+    source: 'LinkedIn',
+    stage: 'Applied',
+  },
+  {
+    name: 'Bhavna Patel',
+    email: 'bhavna.patel@example.com',
+    phone: '+91 99000 11002',
+    jobKey: 'product-designer',
+    source: 'Website',
+    stage: 'Applied',
+  },
+  {
+    name: 'Chirag Gupta',
+    email: 'chirag.gupta@example.com',
+    phone: '+91 99000 11003',
+    jobKey: 'senior-fullstack',
+    source: 'Referral',
+    stage: 'Shortlisted',
+  },
+  {
+    name: 'Divya Rao',
+    email: 'divya.rao@example.com',
+    phone: '+91 99000 11004',
+    jobKey: 'growth-marketing',
+    source: 'LinkedIn',
+    stage: 'Shortlisted',
+  },
+  {
+    name: 'Eshan Malhotra',
+    email: 'eshan.malhotra@example.com',
+    phone: '+91 99000 11005',
+    jobKey: 'senior-fullstack',
+    source: 'LinkedIn',
+    stage: 'Interview',
+    interviews: [
+      {
+        round: 1,
+        title: 'Screening Call',
+        interviewerKey: 'ananya',
+        scheduledAt: '2026-10-15T10:00:00.000Z',
+        status: 'Scheduled',
+      },
+    ],
+  },
+  {
+    name: 'Farhan Akhtar',
+    email: 'farhan.akhtar@example.com',
+    phone: '+91 99000 11006',
+    jobKey: 'product-designer',
+    source: 'Referral',
+    stage: 'Interview',
+    interviews: [
+      {
+        round: 1,
+        title: 'Portfolio Review',
+        interviewerKey: 'ananya',
+        scheduledAt: '2026-10-02T14:00:00.000Z',
+        status: 'Completed',
+        feedback: 'Exceptional design system depth and Figma fluency.',
+        rating: 5,
+        completedAt: '2026-10-02T15:00:00.000Z',
+      },
+    ],
+  },
+  {
+    name: 'Gayatri Menon',
+    email: 'gayatri.menon@example.com',
+    phone: '+91 99000 11007',
+    jobKey: 'senior-fullstack',
+    source: 'Agency',
+    stage: 'Interview',
+    interviews: [
+      {
+        round: 1,
+        title: 'DSA & Systems',
+        interviewerKey: 'ananya',
+        scheduledAt: '2026-09-20T10:00:00.000Z',
+        status: 'Completed',
+        feedback: 'Strong algorithmic fundamentals and clean TypeScript architecture.',
+        rating: 4,
+        completedAt: '2026-09-20T11:00:00.000Z',
+      },
+      {
+        round: 2,
+        title: 'System Design',
+        interviewerKey: 'rahul',
+        scheduledAt: '2026-10-12T11:00:00.000Z',
+        status: 'Scheduled',
+      },
+    ],
+  },
+  {
+    name: 'Harish Pillai',
+    email: 'harish.pillai@example.com',
+    phone: '+91 99000 11008',
+    jobKey: 'product-designer',
+    source: 'LinkedIn',
+    stage: 'Selected',
+    selectionStatus: 'Selected',
+  },
+  {
+    name: 'Ishaan Reddy',
+    email: 'ishaan.reddy@example.com',
+    phone: '+91 99000 11009',
+    jobKey: 'senior-fullstack',
+    source: 'Website',
+    stage: 'Selected',
+    selectionStatus: 'Selected',
+  },
+  {
+    name: 'Jaya Swaminathan',
+    email: 'jaya.swaminathan@example.com',
+    phone: '+91 99000 11010',
+    jobKey: 'senior-fullstack',
+    source: 'Referral',
+    stage: 'Offer',
+    offerStatus: 'Sent',
+    joiningDate: '2026-11-01',
+  },
+  {
+    name: 'Karan Kapoor',
+    email: 'karan.kapoor@example.com',
+    phone: '+91 99000 11011',
+    jobKey: 'growth-marketing',
+    source: 'LinkedIn',
+    stage: 'Offer',
+    offerStatus: 'Accepted',
+    joiningDate: '2026-10-20',
+  },
+  {
+    name: 'Lavanya Joshi',
+    email: 'lavanya.joshi@example.com',
+    phone: '+91 99000 11012',
+    jobKey: 'senior-fullstack',
+    source: 'Other',
+    stage: 'Offer',
+    offerStatus: 'Declined',
+  },
+  {
+    name: 'Manish Sen',
+    email: 'manish.sen@example.com',
+    phone: '+91 99000 11013',
+    jobKey: 'devops-engineer',
+    source: 'LinkedIn',
+    stage: 'Joined',
+    offerStatus: 'Accepted',
+    convertedEmployeeKey: 'rahul',
+  },
+  {
+    name: 'Neha Kulkarni',
+    email: 'neha.kulkarni@example.com',
+    phone: '+91 99000 11014',
+    jobKey: 'technical-recruiter',
+    source: 'Website',
+    stage: 'Rejected',
+    rejectionReason: 'Experience does not match high-growth tech sourcing scope',
+  },
+  {
+    name: 'Omkar Deshmukh',
+    email: 'omkar.deshmukh@example.com',
+    phone: '+91 99000 11015',
+    jobKey: 'senior-fullstack',
+    source: 'Agency',
+    stage: 'Rejected',
+    rejectionReason: 'System architecture round did not meet seniority threshold',
+  },
 ];

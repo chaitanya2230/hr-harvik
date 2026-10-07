@@ -1,4 +1,4 @@
-import { Types } from 'mongoose';
+import { Types, type ClientSession } from 'mongoose';
 import { LeaveBalance } from './leave-balance.model';
 import type { LeaveBalanceDoc } from './leave-balance.schema';
 import { LeaveType } from './leave-type.model';
@@ -47,6 +47,7 @@ export async function initializeEmployeeBalances(
   dateOfJoining: string,
   employmentType: EmploymentType,
   targetYear?: number,
+  session?: ClientSession,
 ): Promise<LeaveBalanceDoc[]> {
   const empId = typeof employeeId === 'string' ? new Types.ObjectId(employeeId) : employeeId;
   const year = targetYear ?? new Date().getUTCFullYear();
@@ -57,7 +58,7 @@ export async function initializeEmployeeBalances(
     applicableEmploymentTypes: employmentType,
     isActive: true,
     isDeleted: false,
-  });
+  }).session(session ?? null);
 
   const createdBalances: LeaveBalanceDoc[] = [];
 
@@ -83,9 +84,9 @@ export async function initializeEmployeeBalances(
           carriedForward: 0,
         },
       },
-      { upsert: true, new: true },
+      { upsert: true, new: true, session: session ?? null },
     );
-    createdBalances.push(balance);
+    if (balance) createdBalances.push(balance);
   }
 
   return createdBalances;
