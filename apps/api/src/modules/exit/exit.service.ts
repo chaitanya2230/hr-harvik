@@ -455,7 +455,11 @@ export async function listExits(
   if (query.stage) filter.stage = query.stage;
 
   if (ctx.account.role === 'Employee') {
-    filter.employeeId = toId(ctx.account.employeeId ?? '');
+    // Fail closed: a missing or malformed link yields no rows, never a 500.
+    if (!ctx.account.employeeId || !Types.ObjectId.isValid(ctx.account.employeeId)) {
+      return { items: [], meta: listMeta(pagination, 0) };
+    }
+    filter.employeeId = toId(ctx.account.employeeId);
   } else if (ctx.account.role === 'Manager') {
     const teamIds = await collectTeamIds(ctx.account.employeeId ?? '');
     filter.employeeId = trustedFilter({ $in: Array.from(teamIds).map(toId) });

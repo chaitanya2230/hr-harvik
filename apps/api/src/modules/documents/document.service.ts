@@ -8,7 +8,7 @@ import type { DocumentTemplateDoc } from './template.schema';
 import { Employee } from '../employees/employee.model';
 import { Exit } from '../exit/exit.model';
 import { recordAudit } from '../audit/audit.service';
-import { collectTeamIds } from '../employees/employee.scope';
+import { collectTeamIds, isValidScopeId } from '../employees/employee.scope';
 import { invalidateDashboardCache } from '../dashboard/dashboard.cache';
 import { buildPagination, listMeta, type Pagination } from '../../utils/http';
 import { trustedFilter } from '../../utils/mongo';
@@ -332,11 +332,11 @@ export async function listDocuments(
 
   // RBAC scope filters
   if (ctx.account.role === 'Employee') {
-    if (!ctx.account.employeeId) return { data: [], meta: listMeta(pagination, 0) };
+    if (!isValidScopeId(ctx.account.employeeId)) return { data: [], meta: listMeta(pagination, 0) };
     query.employeeId = ctx.account.employeeId;
     query.confidential = false;
   } else if (ctx.account.role === 'Manager') {
-    if (!ctx.account.employeeId) return { data: [], meta: listMeta(pagination, 0) };
+    if (!isValidScopeId(ctx.account.employeeId)) return { data: [], meta: listMeta(pagination, 0) };
     const teamIds = await collectTeamIds(ctx.account.employeeId);
     const allowedIds = [toId(ctx.account.employeeId), ...Array.from(teamIds).map(toId)];
 

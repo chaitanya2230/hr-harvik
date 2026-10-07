@@ -644,4 +644,155 @@ describe('AGENTS.md §14 — LEAVE ACCEPTANCE TESTS', () => {
     expect(succeeded.length).toBe(1);
     expect(failed.length).toBe(1);
   });
+
+  it('concurrent overlapping applications — exactly one wins the overlap race', async () => {
+    const empId = await employeeIdByEmail(SEEDED.contractor);
+    const lt = await LeaveType.findOne({ code: 'CASUAL', isDeleted: false });
+    expect(lt).toBeDefined();
+
+    // Generous balance: only the overlap rule may reject here.
+    await LeaveBalance.updateOne(
+      { employeeId: empId, leaveTypeId: lt!._id, year: 2026 },
+      { $set: { allocated: 12, used: 0, pending: 0, carriedForward: 0 } },
+      { upsert: true },
+    );
+
+    const fromDate = '2026-03-02'; // Monday
+    const toDate = '2026-03-03'; // Tuesday
+    await LeaveRequest.deleteMany({
+      employeeId: empId,
+      fromDate: trustedFilter({ $lte: toDate }),
+      toDate: trustedFilter({ $gte: fromDate }),
+    });
+
+    // Same overlapping range submitted simultaneously: snapshot isolation
+    // hides each uncommitted insert from the other, so only the per-employee
+    // transaction serialization lets the loser observe the winner.
+    const attempts = await Promise.allSettled(
+      [1, 2, 3].map((n) =>
+        applyLeave(
+          {
+            employeeId: empId,
+            leaveTypeId: String(lt!._id),
+            fromDate,
+            toDate,
+            halfDay: false,
+            reason: `Concurrent overlap ${n}`,
+          },
+          { userId: admin.account.userId, role: 'HR Admin' },
+        ),
+      ),
+    );
+
+    const succeeded = attempts.filter((r) => r.status === 'fulfilled');
+    const failed = attempts.filter((r) => r.status === 'rejected');
+    expect(succeeded.length).toBe(1);
+    expect(failed.length).toBe(2);
+    for (const f of failed) {
+      expect((f as PromiseRejectedResult).reason?.message ?? '').toMatch(/overlapping/i);
+    }
+  });
+
+  it('concurrent approvals — the same Pending request cannot be approved twice', async () => {
+    const empId = await employeeIdByEmail(SEEDED.financeAnalyst);
+    const lt = await LeaveType.findOne({ code: 'CASUAL', isDeleted: false });
+    expect(lt).toBeDefined();
+
+    await LeaveBalance.updateOne(
+      { employeeId: empId, leaveTypeId: lt!._id, year: 2026 },
+      { $set: { allocated: 12, used: 0, pending: 0, carriedForward: 0 } },
+      { upsert: true },
+    );
+
+    const fromDate = '2026-03-09'; // Monday
+    const toDate = '2026-03-10';
+    await LeaveRequest.deleteMany({
+      employeeId: empId,
+      fromDate: trustedFilter({ $lte: toDate }),
+      toDate: trustedFilter({ $gte: fromDate }),
+    });
+
+    const created = await applyLeave(
+      {
+        employeeId: empId,
+        leaveTypeId: String(lt!._id),
+        fromDate,
+        toDate,
+        halfDay: false,
+        reason: 'Double-approve race target',
+      },
+      { userId: admin.account.userId, role: 'HR Admin' },
+    );
+    const requestId = String(created._id);
+
+    const { reviewLeave } = await import('../../src/modules/leave/leave.service');
+    const approver = {
+      userId: admin.account.userId,
+      role: 'HR Admin' as const,
+      employeeId: admin.account.employeeId,
+    };
+    const attempts = await Promise.allSettled(
+      [1, 2, 3].map(() => reviewLeave(requestId, { status: 'Approved' as const }, approver)),
+    );
+
+    const succeeded = attempts.filter((r) => r.status === 'fulfilled');
+    expect(succeeded.length).toBe(1);
+
+    // Balance deducted exactly once despite three concurrent approvals.
+    const balance = await LeaveBalance.findOne({
+      employeeId: empId,
+      leaveTypeId: lt!._id,
+      year: 2026,
+    }).lean();
+    expect(balance?.used).toBe(2);
+    expect(balance?.pending).toBe(0);
+  });
+
+  it('concurrent cancellations — exactly one cancellation wins', async () => {
+    const empId = await employeeIdByEmail(SEEDED.productDesigner);
+    const lt = await LeaveType.findOne({ code: 'CASUAL', isDeleted: false });
+    expect(lt).toBeDefined();
+
+    await LeaveBalance.updateOne(
+      { employeeId: empId, leaveTypeId: lt!._id, year: 2026 },
+      { $set: { allocated: 12, used: 0, pending: 0, carriedForward: 0 } },
+      { upsert: true },
+    );
+
+    const fromDate = '2026-03-16'; // Monday
+    const toDate = '2026-03-17';
+    await LeaveRequest.deleteMany({
+      employeeId: empId,
+      fromDate: trustedFilter({ $lte: toDate }),
+      toDate: trustedFilter({ $gte: fromDate }),
+    });
+
+    const created = await applyLeave(
+      {
+        employeeId: empId,
+        leaveTypeId: String(lt!._id),
+        fromDate,
+        toDate,
+        halfDay: false,
+        reason: 'Double-cancel race target',
+      },
+      { userId: admin.account.userId, role: 'HR Admin' },
+    );
+    const requestId = String(created._id);
+
+    const { cancelLeave } = await import('../../src/modules/leave/leave.service');
+    const actor = { userId: admin.account.userId, role: 'HR Admin' as const };
+    const attempts = await Promise.allSettled([1, 2].map(() => cancelLeave(requestId, actor)));
+
+    expect(attempts.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.filter((r) => r.status === 'rejected')).toHaveLength(1);
+
+    // Pending restored exactly once — never driven negative by a double cancel.
+    const balance = await LeaveBalance.findOne({
+      employeeId: empId,
+      leaveTypeId: lt!._id,
+      year: 2026,
+    }).lean();
+    expect(balance?.pending).toBe(0);
+  });
 });

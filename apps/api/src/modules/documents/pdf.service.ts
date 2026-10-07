@@ -223,6 +223,15 @@ export function validateGenerationRules(
 
 /**
  * Compile template HTML into rendered string.
+ *
+ * XSS safety (AGENTS.md §14 "unsafe HTML sanitized"):
+ *  1. The template itself is sanitized before compilation.
+ *  2. Handlebars compiles with DEFAULT escaping (no `noEscape` option), so
+ *     every `{{variable}}` interpolation of employee-controlled values is
+ *     HTML-escaped and can never become executable markup.
+ *  3. Defense in depth: the RENDERED output is sanitized once more, so even a
+ *     raw triple-stash insertion cannot smuggle scripts or event handlers
+ *     into preview HTML rendered via dangerouslySetInnerHTML.
  */
 export function renderTemplate(
   bodyHtml: string,
@@ -230,8 +239,8 @@ export function renderTemplate(
 ): string {
   const sanitized = sanitizeTemplateHtml(bodyHtml);
   validateTemplateVariables(sanitized, context);
-  const compiled = Handlebars.compile(sanitized, { noEscape: true });
-  return compiled(context);
+  const compiled = Handlebars.compile(sanitized);
+  return sanitizeTemplateHtml(compiled(context));
 }
 
 /**

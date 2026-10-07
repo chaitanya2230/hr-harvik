@@ -87,6 +87,13 @@ export interface EmployeeDoc {
   lastWorkingDay?: string | null;
   createdBy: Types.ObjectId | null;
   isDeleted: boolean;
+  /**
+   * Per-employee serialization counter for leave mutations. Concurrent leave
+   * applications touch this document first inside their transaction, so all
+   * but one abort with a write conflict and retry — at which point the
+   * overlap check observes the winner. Never read for business meaning.
+   */
+  leaveOpSeq: number;
 }
 
 const addressSchema = new Schema<AddressDoc>(
@@ -198,6 +205,7 @@ export const employeeSchema = new Schema<EmployeeDoc>(
     lastWorkingDay: { type: String, default: null },
     createdBy: { type: Types.ObjectId, ref: 'User', default: null },
     isDeleted: { type: Boolean, default: false },
+    leaveOpSeq: { type: Number, default: 0 },
   },
   {
     timestamps: true,

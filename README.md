@@ -47,7 +47,9 @@ Mandated by `AGENTS.md` §3 and not substituted anywhere.
 │   │   │   ├── config/           # zod-validated env, domain constants
 │   │   │   ├── db/               # mongo + redis connections
 │   │   │   ├── middleware/       # auth, rbac, validate, errorHandler, rateLimit
-│   │   │   ├── modules/          # auth, users, employees, departments, audit, counters, health
+│   │   │   ├── modules/          # auth, users, employees, departments, audit, counters, health,
+│   │   │   │                       # dashboard, assets, licenses, access, exit, documents,
+│   │   │   │                       # attendance, leave (+ templates, holidays, corrections)
 │   │   │   ├── jobs/             # BullMQ queues + schedulers
 │   │   │   ├── utils/            # crypto, logger, ids, dates, errors, cache, shutdown
 │   │   │   ├── seed/             # `npm run seed`
@@ -411,7 +413,7 @@ consume the budget.
 | — | Config validation, logging, errors, `/health`, `/ready` | `config/env`, `utils/logger`, `utils/errors`, `modules/health` | **P0 done** |
 | — | Seed data + four demo logins | `src/seed` | **P0 done** (HR-scoped fixtures) |
 | 2 | Employee management, Employee 360 | `modules/employees` | **P1 done** — CRUD, 360, history, status machine, re-hire, 31 API tests |
-| 1 | Dashboard (14 metrics, 7 quick actions) | `modules/dashboard` | **P1 done** — real MongoDB data, 60s cache, 5 future metrics honestly `null`, 7 API tests |
+| 1 | Dashboard (14 metrics, 7 quick actions) | `modules/dashboard` | **P1 done, P2/P5 extended** — real MongoDB data, 60s cache; only P6 onboarding + P4 document-generation metrics remain honestly `null` |
 | 3 | Recruitment | `modules/recruitment` | P6 |
 | 4 | Onboarding | `modules/onboarding` | P6 |
 | 5 | Attendance | `modules/attendance` | **P5 done** — ledger, daily/monthly grid, corrections, holidays, nightly job, 15 API tests |

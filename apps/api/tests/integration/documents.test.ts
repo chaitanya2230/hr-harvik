@@ -526,4 +526,50 @@ describe('AGENTS.md §14 — DOCUMENTS', () => {
     expect(bodyHtml).toContain('<h2>Safe Title</h2>');
     expect(bodyHtml).toContain('Safe Content for {{employee.firstName}}');
   });
+
+  it('employee-controlled values cannot execute in preview — interpolated markup is escaped end to end', async () => {
+    // A hostile designation stored on the employee record must render inert.
+    const targetEmployeeId = await employeeIdByEmail(SEEDED.softwareEngineer);
+    const hostile = 'Engineer <script>alert("xss")</script><img src=x onerror=alert(1)>';
+
+    const updateRes = await request(app)
+      .patch(`/api/v1/employees/${targetEmployeeId}`)
+      .set(...authAs.admin())
+      .send({ designation: hostile });
+    expect(updateRes.status).toBe(200);
+
+    try {
+      const templateRes = await request(app)
+        .post('/api/v1/document-templates')
+        .set(...authAs.admin())
+        .send({
+          name: `XSS Interpolation Template ${Date.now()}`,
+          category: 'Offer Letter',
+          applicableEmploymentTypes: ['Full-Time'],
+          bodyHtml:
+            '<h1>Offer</h1><p>Dear {{employee.firstName}}, your role is {{employee.designation}}.</p>',
+        });
+      expect(templateRes.status).toBe(201);
+
+      const previewRes = await request(app)
+        .post(`/api/v1/document-templates/${templateRes.body.data.id}/preview`)
+        .set(...authAs.admin())
+        .send({ employeeId: targetEmployeeId });
+
+      expect(previewRes.status).toBe(200);
+      const html = previewRes.body.data.renderedHtml as string;
+      expect(html).not.toContain('<script');
+      expect(html).not.toContain('<img');
+      expect(html).not.toMatch(/<[^>]*\bonerror\b/);
+      // Content is preserved as inert escaped text, and the page still renders.
+      expect(html).toContain('&lt;script&gt;');
+      expect(html).toContain('<h1>Offer</h1>');
+    } finally {
+      // Restore the seeded designation so later suites see canonical data.
+      await request(app)
+        .patch(`/api/v1/employees/${targetEmployeeId}`)
+        .set(...authAs.admin())
+        .send({ designation: 'Software Engineer' });
+    }
+  });
 });

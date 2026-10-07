@@ -17,6 +17,8 @@ import { AttendanceCorrection } from '../modules/attendance/correction.model';
 import { LeaveType } from '../modules/leave/leave-type.model';
 import { LeaveBalance } from '../modules/leave/leave-balance.model';
 import { LeaveRequest } from '../modules/leave/leave-request.model';
+import { Exit } from '../modules/exit/exit.model';
+import { initiateExit } from '../modules/exit/exit.service';
 import { initializeEmployeeBalances } from '../modules/leave/leave-balance.service';
 import { isWeekend } from '../utils/dates';
 import { hashPassword } from '../modules/auth/auth.service';
@@ -88,6 +90,7 @@ const clearCollections = async (): Promise<void> => {
     LeaveType.deleteMany({}),
     LeaveBalance.deleteMany({}),
     LeaveRequest.deleteMany({}),
+    Exit.deleteMany({}),
     // Reset the counters so codes restart at 0001 and stay deterministic.
     Counter.deleteMany({}),
   ]);
@@ -143,6 +146,7 @@ export async function runSeed({ reset = true }: { reset?: boolean } = {}): Promi
       probationEndDate: seedEmployee.probationEndDate ?? null,
       compensation: seedEmployee.compensation,
       status: seedEmployee.status,
+      lastWorkingDay: seedEmployee.lastWorkingDay ?? null,
       statusHistory: [
         {
           status: seedEmployee.status,
@@ -282,7 +286,121 @@ export async function runSeed({ reset = true }: { reset?: boolean } = {}): Promi
     employees: ordered.length,
     users: DEMO_USERS.length,
     ...(await seedP2Fixtures(employeeIdByKey)),
+    ...(await seedExitFixtures(employeeIdByKey)),
   };
+}
+
+/**
+ * P3 exit demo data (§12): open exits for the two On Notice employees, a
+ * completed exit for the Relieved employee, and a pending leave request for
+ * the exit-fixture employee — the §14 E2E fixture shape (2 assets, 3 licenses,
+ * 1 access item from the P2 fixtures above, plus pending leave here).
+ */
+async function seedExitFixtures(
+  employeeIdByKey: Map<string, Types.ObjectId>,
+): Promise<Record<string, never>> {
+  const adminEmail = DEMO_USERS[0]?.email;
+  if (!adminEmail) throw new Error('Seed demo users misconfigured');
+  const adminUser = await User.findOne({ email: adminEmail }).exec();
+  if (!adminUser) throw new Error('Seed admin user not found for exit fixtures');
+  const meeraId = employeeIdByKey.get('meera');
+  if (!meeraId) throw new Error('Seed employee "meera" not found for exit fixtures');
+  const ctx = {
+    account: {
+      userId: String(adminUser._id),
+      email: adminEmail,
+      role: 'HR Admin' as const,
+      employeeId: String(meeraId),
+    },
+    ip: null,
+    requestId: null,
+  };
+
+  // Open exits for seeded On Notice employees (checklist built from their
+  // current assignments by the exit service itself).
+  for (const key of ['lakshmi', 'manoj']) {
+    const employeeId = employeeIdByKey.get(key);
+    if (!employeeId) throw new Error(`Seed employee "${key}" not found for exit fixtures`);
+    const employee = await Employee.findById(employeeId).exec();
+    if (!employee) throw new Error(`Seed employee "${key}" missing`);
+    await initiateExit(String(employeeId), {
+      reason: 'Career move',
+      noticePeriodDays: 30,
+      lastWorkingDay: employee.lastWorkingDay ?? undefined,
+    }, ctx);
+  }
+
+  // Completed exit for the Relieved employee, with closed employment history.
+  const nehaId = employeeIdByKey.get('neha');
+  if (!nehaId) throw new Error('Seed employee "neha" not found for exit fixtures');
+  await Exit.create({
+    employeeId: nehaId,
+    resignationDate: '2026-07-15',
+    noticePeriodDays: 30,
+    lastWorkingDay: '2026-08-14',
+    reason: 'Relocation',
+    reasonNote: null,
+    clearances: {
+      manager: { status: 'Approved', reviewedBy: adminUser._id, reviewedAt: new Date('2026-08-10T00:00:00.000Z') },
+      hr: { status: 'Approved', reviewedBy: adminUser._id, reviewedAt: new Date('2026-08-12T00:00:00.000Z') },
+      finance: { status: 'Approved', reviewedBy: adminUser._id, reviewedAt: new Date('2026-08-13T00:00:00.000Z') },
+    },
+    checklist: [],
+    finalSettlementStatus: 'Completed',
+    experienceLetterDocId: null,
+    relievingLetterDocId: null,
+    stage: 'Relieved',
+    completedAt: new Date('2026-08-14T00:00:00.000Z'),
+    forceRelieved: false,
+    forceReason: null,
+    forceRelievedBy: null,
+    createdBy: adminUser._id,
+    isDeleted: false,
+  });
+  await Employee.updateOne(
+    { _id: nehaId },
+    { $set: { 'employmentHistory.0.to': new Date('2026-08-14T00:00:00.000Z') } },
+  ).exec();
+
+  // Pending leave for the exit-fixture employee (2 assets, 3 licenses and
+  // 1 access item already wired through the P2 fixtures above).
+  const omprakashId = employeeIdByKey.get('omprakash');
+  if (!omprakashId) throw new Error('Seed employee "omprakash" not found for exit fixtures');
+  const casual = await LeaveType.findOne({ code: 'CASUAL', isDeleted: false }).exec();
+  if (!casual) throw new Error('Seed leave type CASUAL not found for exit fixtures');
+
+  // Next Monday–Tuesday at least a week out (always working days by construction).
+  const start = new Date();
+  start.setUTCHours(0, 0, 0, 0);
+  const toISO = (d: Date): string => d.toISOString().slice(0, 10);
+  const cursor = new Date(start.getTime() + 7 * 86_400_000);
+  while (cursor.getUTCDay() !== 1) cursor.setUTCDate(cursor.getUTCDate() + 1);
+  const fromDate = toISO(cursor);
+  const tuesday = new Date(cursor.getTime() + 86_400_000);
+  const toDate = toISO(tuesday);
+
+  await LeaveRequest.create({
+    employeeId: omprakashId,
+    leaveTypeId: casual._id,
+    fromDate,
+    toDate,
+    halfDay: false,
+    days: 2,
+    reason: 'Family function',
+    status: 'Pending',
+    approverId: null,
+    decisionNote: null,
+    decidedAt: null,
+    createdBy: null,
+    isDeleted: false,
+  });
+  const year = parseInt(fromDate.slice(0, 4), 10);
+  await LeaveBalance.updateOne(
+    { employeeId: omprakashId, leaveTypeId: casual._id, year },
+    { $inc: { pending: 2 } },
+  ).exec();
+
+  return {};
 }
 
 /** P2 fixtures: assets, licenses (+ assignments), access items (§12, D-12). */

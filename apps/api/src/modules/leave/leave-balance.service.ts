@@ -3,7 +3,7 @@ import { LeaveBalance } from './leave-balance.model';
 import type { LeaveBalanceDoc } from './leave-balance.schema';
 import { LeaveType } from './leave-type.model';
 import { Holiday } from '../attendance/holiday.model';
-import { collectTeamIds } from '../employees/employee.scope';
+import { collectTeamIds, isValidScopeId } from '../employees/employee.scope';
 import { eachDayInclusive, isWeekend } from '../../utils/dates';
 import { trustedFilter } from '../../utils/mongo';
 import type { AuthAccount } from '../auth/auth.service';
@@ -151,7 +151,7 @@ export async function listBalances(
   const filter: Record<string, unknown> = { year: currentYear, isDeleted: false };
 
   if (actor.role === 'Employee') {
-    if (!actor.employeeId) return [];
+    if (!isValidScopeId(actor.employeeId)) return [];
     filter.employeeId = new Types.ObjectId(actor.employeeId);
   } else if (actor.role === 'Manager') {
     if (!actor.employeeId) return [];

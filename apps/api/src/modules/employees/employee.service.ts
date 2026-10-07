@@ -16,7 +16,7 @@ import { collectTeamIds } from './employee.scope';
 import { invalidateDashboardCache } from '../dashboard/dashboard.cache';
 import { initializeEmployeeBalances } from '../leave/leave-balance.service';
 import { buildPagination, buildSort, listMeta, type Pagination } from '../../utils/http';
-import { encryptField } from '../../utils/crypto';
+import { decryptField, encryptField } from '../../utils/crypto';
 import { trustedFilter } from '../../utils/mongo';
 import { conflict, notFound, unprocessable } from '../../utils/errors';
 import { isDateOnlyString, toDateOnly } from '../../utils/dates';
@@ -216,8 +216,14 @@ interface EmployeeView {
   address: Record<string, string | undefined> | null;
   emergencyContact: Record<string, string | undefined> | null;
   compensation: { amount?: number; currency?: string; period?: string } | null;
-  /** Never carries an account number — see `projectBankDetails`. */
-  bankDetails: { accountHolder?: string; ifscOrRouting?: string; bankName?: string; masked: true } | null;
+  /** Masked for everyone except HR Admin / self on single-detail reads (§7). */
+  bankDetails: {
+    accountHolder?: string;
+    accountNumber?: string;
+    ifscOrRouting?: string;
+    bankName?: string;
+    masked: boolean;
+  } | null;
   statusHistory: Array<{ status: EmployeeStatus; changedAt: string; changedBy: string | null; note?: string }>;
   employmentHistory: Array<{
     employmentType: EmploymentType;
@@ -255,17 +261,33 @@ const plainSubdoc = <T>(value: T): Record<string, unknown> => {
 
 /**
  * §7 — "Normal responses must mask bank details except HR Admin/self according
- * to RBAC", and §2.16 — never expose bank details in normal responses.
+ * to RBAC", balanced against §2.16 (never expose bank details in normal list
+ * responses).
  *
- * The service never decrypts an account number for a read; the only path that
- * reveals one is the P0 user module. Masking here is therefore belt-and-braces:
- * `accountNumberEnc` cannot reach a response even if the shape changes later.
+ * Lists and mutation echoes are always masked. Only the single-employee detail
+ * read reveals the account number, and only to HR Admin or the employee
+ * themselves. `accountNumberEnc` itself never reaches any response.
  */
-function projectBankDetails(doc: EmployeeDoc): EmployeeView['bankDetails'] {
+function projectBankDetails(doc: EmployeeDoc, reveal: boolean): EmployeeView['bankDetails'] {
   const bank = doc.bankDetails;
   const hasAnything =
     bank?.accountHolder || bank?.accountNumberEnc || bank?.ifscOrRouting || bank?.bankName;
   if (!hasAnything) return null;
+
+  if (reveal && bank?.accountNumberEnc) {
+    try {
+      return {
+        accountHolder: bank.accountHolder ?? undefined,
+        accountNumber: decryptField(bank.accountNumberEnc),
+        ifscOrRouting: bank.ifscOrRouting ?? undefined,
+        bankName: bank.bankName ?? undefined,
+        masked: false,
+      };
+    } catch {
+      // A corrupt ciphertext must not fail the whole read; fall through masked.
+    }
+  }
+
   return {
     accountHolder: bank?.accountHolder ?? undefined,
     ifscOrRouting: bank?.ifscOrRouting ?? undefined,
@@ -283,7 +305,11 @@ function maySeeCompensation(account: AuthAccount, employeeId: string): boolean {
   );
 }
 
-function toView(doc: Populated, account: AuthAccount): EmployeeView {
+function toView(
+  doc: Populated,
+  account: AuthAccount,
+  options: { revealBankDetails?: boolean } = {},
+): EmployeeView {
   const id = doc._id.toString();
   const manager = doc.reportingManagerId;
 
@@ -318,7 +344,7 @@ function toView(doc: Populated, account: AuthAccount): EmployeeView {
     compensation: maySeeCompensation(account, id)
       ? ((doc.compensation as EmployeeView['compensation']) ?? null)
       : null,
-    bankDetails: projectBankDetails(doc),
+    bankDetails: projectBankDetails(doc, options.revealBankDetails ?? false),
     statusHistory: (doc.statusHistory ?? []).map((entry) => ({
       status: entry.status,
       changedAt: entry.changedAt.toISOString(),
@@ -421,7 +447,10 @@ export async function getEmployeeById(id: string, ctx: EmployeeContext): Promise
     .exec();
 
   if (!doc) throw notFound('Employee');
-  return toView(doc as unknown as Populated, ctx.account);
+  // §7 exception: HR Admin and the employee themselves see full bank details
+  // on the single-detail read. Every other path stays masked.
+  const revealBankDetails = ctx.account.role === 'HR Admin' || ctx.account.employeeId === id;
+  return toView(doc as unknown as Populated, ctx.account, { revealBankDetails });
 }
 
 /** §8.2 `GET /employees/:id/history` — status plus employment history. */

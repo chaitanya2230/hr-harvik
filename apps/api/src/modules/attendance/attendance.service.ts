@@ -6,12 +6,18 @@ import type { AttendanceCorrectionDoc } from './correction.schema';
 import { Holiday } from './holiday.model';
 import { Employee } from '../employees/employee.model';
 import { LeaveRequest } from '../leave/leave-request.model';
-import { collectTeamIds } from '../employees/employee.scope';
+import { collectTeamIds, isValidScopeId } from '../employees/employee.scope';
 import { recordAudit } from '../audit/audit.service';
 import { invalidateDashboardCache } from '../dashboard/dashboard.cache';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../utils/errors';
 import { isWeekend, todayInTimeZone } from '../../utils/dates';
 import { trustedFilter } from '../../utils/mongo';
+
+/** Duplicate-key (11000) detector for the attendance upsert fallback. */
+const isDuplicateKey = (error: unknown): boolean =>
+  typeof error === 'object' &&
+  error !== null &&
+  (error as { code?: number }).code === 11000;
 import type { AuthAccount } from '../auth/auth.service';
 import type {
   MarkAttendanceInput,
@@ -111,7 +117,7 @@ export async function listAttendance(
   if (query.status) filter.status = query.status;
 
   if (actor.role === 'Employee') {
-    if (!actor.employeeId) return { data: [], total: 0, page, limit };
+    if (!isValidScopeId(actor.employeeId)) return { data: [], total: 0, page, limit };
     filter.employeeId = new Types.ObjectId(actor.employeeId);
   } else if (actor.role === 'Manager') {
     if (!actor.employeeId) return { data: [], total: 0, page, limit };
@@ -154,7 +160,7 @@ export async function getMonthlyGrid(
 }> {
   const employeeFilter: Record<string, unknown> = { isDeleted: false };
   if (actor.role === 'Employee') {
-    if (!actor.employeeId) return { yearMonth, records: [] };
+    if (!isValidScopeId(actor.employeeId)) return { yearMonth, records: [] };
     employeeFilter._id = new Types.ObjectId(actor.employeeId);
   } else if (actor.role === 'Manager') {
     if (!actor.employeeId) return { yearMonth, records: [] };
@@ -276,7 +282,7 @@ export async function listAttendanceCorrections(
   if (query.status) filter.status = query.status;
 
   if (actor.role === 'Employee') {
-    if (!actor.employeeId) return [];
+    if (!isValidScopeId(actor.employeeId)) return [];
     filter.employeeId = new Types.ObjectId(actor.employeeId);
   } else if (actor.role === 'Manager') {
     if (!actor.employeeId) return [];
@@ -322,11 +328,28 @@ export async function reviewAttendanceCorrection(
     }
   }
 
-  correction.status = input.status;
-  correction.reviewNote = input.reviewNote ?? null;
-  correction.reviewedBy = actor.userId ? new Types.ObjectId(actor.userId) : null;
-  correction.decidedAt = new Date();
-  await correction.save();
+  // Atomic state claim (same rationale as leave review): exactly one
+  // concurrent decision wins; the loser observes the decided state.
+  const claimed = await AttendanceCorrection.findOneAndUpdate(
+    { _id: correction._id, status: 'Pending', isDeleted: false },
+    {
+      $set: {
+        status: input.status,
+        reviewNote: input.reviewNote ?? null,
+        reviewedBy: actor.userId ? new Types.ObjectId(actor.userId) : null,
+        decidedAt: new Date(),
+      },
+    },
+    { new: true },
+  ).exec();
+
+  if (!claimed) {
+    const current = await AttendanceCorrection.findById(correction._id).select('status').lean().exec();
+    if (!current) {
+      throw notFound('Attendance correction request not found');
+    }
+    throw badRequest(`Correction is already ${current.status}`);
+  }
 
   if (input.status === 'Approved') {
     // Upsert or update attendance record
@@ -343,15 +366,32 @@ export async function reviewAttendanceCorrection(
       existing.note = correction.reason;
       await existing.save();
     } else {
-      await Attendance.create({
-        employeeId: correction.employeeId,
-        date: correction.date,
-        status: correction.requestedStatus,
-        workMode: correction.requestedWorkMode,
-        source: 'Correction',
-        note: correction.reason,
-        createdBy: actor.userId ? new Types.ObjectId(actor.userId) : null,
-      });
+      try {
+        await Attendance.create({
+          employeeId: correction.employeeId,
+          date: correction.date,
+          status: correction.requestedStatus,
+          workMode: correction.requestedWorkMode,
+          source: 'Correction',
+          note: correction.reason,
+          createdBy: actor.userId ? new Types.ObjectId(actor.userId) : null,
+        });
+      } catch (error) {
+        // A concurrent writer (nightly job, manual mark) created the record
+        // between our check and insert: fall back to updating it.
+        if (!isDuplicateKey(error)) throw error;
+        await Attendance.updateOne(
+          { employeeId: correction.employeeId, date: correction.date, isDeleted: false },
+          {
+            $set: {
+              status: correction.requestedStatus,
+              workMode: correction.requestedWorkMode,
+              source: 'Correction',
+              note: correction.reason,
+            },
+          },
+        ).exec();
+      }
     }
     await invalidateDashboardCache();
   }
@@ -360,11 +400,11 @@ export async function reviewAttendanceCorrection(
     actorId: actor.userId ? new Types.ObjectId(actor.userId) : null,
     action: 'STATUS_CHANGE',
     entityType: 'AttendanceCorrection',
-    entityId: correction._id,
-    after: correction.toObject(),
+    entityId: claimed._id,
+    after: claimed.toObject(),
   });
 
-  return correction;
+  return claimed;
 }
 
 /**

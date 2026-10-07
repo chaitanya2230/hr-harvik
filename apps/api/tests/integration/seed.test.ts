@@ -10,6 +10,13 @@ import { Employee } from '../../src/modules/employees/employee.model';
 import { User } from '../../src/modules/users/user.model';
 import type { Role } from '../../src/config/constants';
 import { DEMO_ACCOUNTS, login } from '../support/helpers';
+import { Exit } from '../../src/modules/exit/exit.model';
+import { AssetAssignment } from '../../src/modules/assets/asset.model';
+import { LicenseAssignment } from '../../src/modules/licenses/license.model';
+import { AccessItem } from '../../src/modules/access/access.model';
+import { LeaveRequest } from '../../src/modules/leave/leave-request.model';
+import { DocumentTemplate } from '../../src/modules/documents/template.model';
+import { trustedFilter } from '../../src/utils/mongo';
 
 /** AGENTS.md §12 — `npm run seed` must create usable demo data. */
 
@@ -69,7 +76,12 @@ describe('seed data (§12)', () => {
         expect(employee.statusHistory, `${employee.employeeCode} status history`).toHaveLength(1);
         expect(employee.statusHistory[0]?.status).toBe(employee.status);
         expect(employee.employmentHistory, `${employee.employeeCode} employment history`).toHaveLength(1);
-        expect(employee.employmentHistory[0]?.to).toBeNull();
+        if (employee.status === 'Relieved') {
+          // §8.10 — a Relieved employee's employment history is closed.
+          expect(employee.employmentHistory[0]?.to).not.toBeNull();
+        } else {
+          expect(employee.employmentHistory[0]?.to).toBeNull();
+        }
       }
     });
 
@@ -115,6 +127,77 @@ describe('seed data (§12)', () => {
         if (!bank?.accountNumberEnc) continue;
         expect(bank.accountNumberEnc).toMatch(/^v1:/);
       }
+    });
+
+    it('meets the §12 employee minimums: ~25 total, ≥2 On Notice, ≥1 Relieved', async () => {
+      const total = await Employee.countDocuments({ isDeleted: false });
+      expect(total).toBeGreaterThanOrEqual(25);
+
+      const onNotice = await Employee.countDocuments({ status: 'On Notice', isDeleted: false });
+      expect(onNotice).toBeGreaterThanOrEqual(2);
+
+      const relieved = await Employee.countDocuments({ status: 'Relieved', isDeleted: false });
+      expect(relieved).toBeGreaterThanOrEqual(1);
+
+      // Seeded On Notice employees carry a last working day for the demo.
+      const withoutLwd = await Employee.countDocuments({
+        status: 'On Notice',
+        isDeleted: false,
+        $or: trustedFilter([
+          { lastWorkingDay: null },
+          { lastWorkingDay: trustedFilter({ $exists: false }) },
+        ]),
+      });
+      expect(withoutLwd).toBe(0);
+    });
+
+    it('opens exit records for seeded On Notice employees (§12 exit demo data)', async () => {
+      const openExits = await Exit.countDocuments({
+        stage: trustedFilter({ $nin: ['Relieved', 'Cancelled'] }),
+        isDeleted: false,
+      });
+      expect(openExits).toBeGreaterThanOrEqual(2);
+    });
+
+    it('seeds all 9 document templates (§12)', async () => {
+      const count = await DocumentTemplate.countDocuments({ isDeleted: false });
+      expect(count).toBe(9);
+    });
+
+    it('seeds an exit-fixture employee with 2 assets, 3 licenses, 1 access item and pending leave (§12/§14)', async () => {
+      const fixture = await Employee.findOne({
+        email: 'omprakash.reddy@harviktech.com',
+        isDeleted: false,
+      }).lean().exec();
+      expect(fixture).toBeDefined();
+
+      const activeAssets = await AssetAssignment.countDocuments({
+        employeeId: fixture!._id,
+        actualReturnDate: null,
+        isDeleted: false,
+      });
+      expect(activeAssets).toBe(2);
+
+      const activeLicenses = await LicenseAssignment.countDocuments({
+        employeeId: fixture!._id,
+        status: 'Assigned',
+        isDeleted: false,
+      });
+      expect(activeLicenses).toBe(3);
+
+      const activeAccess = await AccessItem.countDocuments({
+        employeeId: fixture!._id,
+        status: 'Active',
+        isDeleted: false,
+      });
+      expect(activeAccess).toBe(1);
+
+      const pendingLeave = await LeaveRequest.countDocuments({
+        employeeId: fixture!._id,
+        status: 'Pending',
+        isDeleted: false,
+      });
+      expect(pendingLeave).toBe(1);
     });
   });
 
@@ -192,7 +275,14 @@ describe('seed data (§12)', () => {
     it('leaves the audit trail empty until real activity happens', async () => {
       const { AuditLog } = await import('../../src/modules/audit/audit.model');
 
-      expect(await AuditLog.countDocuments({})).toBe(0);
+      // Seeding the §12 exit fixtures runs the real exit service, which
+      // legitimately audits its two exit initiations — and nothing else.
+      const entries = await AuditLog.find({}).lean().exec();
+      expect(entries).toHaveLength(2);
+      for (const entry of entries) {
+        expect(entry.action).toBe('exit.initiated');
+        expect(entry.entityType).toBe('Exit');
+      }
     });
   });
 });

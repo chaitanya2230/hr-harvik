@@ -613,6 +613,73 @@ AGENTS.md §7, §8.5, §8.6, §14 mandate Attendance and Leave Management:
    - Dynamic Dashboard: Calculates `onLeave` count from active approved leaves covering the current date, links `/leave` navigation, and aggregates pending leaves and attendance corrections into `pendingHrActions`.
 
 
+## D-37 — Template rendering escapes interpolated values, then sanitizes output
+
+*Status: accepted · audit fix (P4)*
+
+Preview HTML is rendered in the browser via `dangerouslySetInnerHTML`, so the
+previous `Handlebars.compile(..., { noEscape: true })` turned any
+employee-controlled field (designation, names, address, …) into executable
+markup — a stored XSS vector the template-only sanitizer could not see. The fix
+is two-layered in `renderTemplate` (`apps/api/src/modules/documents/pdf.service.ts`):
+template HTML is sanitized before compilation as before, compilation now uses
+default Handlebars escaping so every `{{variable}}` becomes inert text, and the
+rendered output is sanitized once more so even a raw triple-stash insertion
+cannot smuggle scripts or event handlers into preview HTML. No template uses
+triple-stash, so legitimate formatting is unaffected; PDF generation is
+unchanged (it strips tags downstream). Pinned by `tests/unit/pdf-template.test.ts`
+(6 tests) and an end-to-end preview test in `documents.test.ts`.
+
+## D-38 — Leave/attendance decisions use atomic claims; applies serialize per employee
+
+*Status: accepted · audit fix (P5)*
+
+Read-then-write decisions lose races: two concurrent approves could both
+approve one request (double balance deduction), and two simultaneous overlapping
+applications could both pass the overlap check (snapshot isolation hides each
+uncommitted insert from the other). Fixes:
+- Leave approve/reject and both cancel paths, plus attendance-correction
+  review, now claim the decision with a single `findOneAndUpdate` guarded on
+  the expected prior status. Exactly one concurrent caller wins; losers observe
+  the decided state. Correction approval additionally tolerates a duplicate-key
+  abort on the attendance upsert (nightly job or manual mark raced it) by
+  falling back to an update.
+- Leave application runs overlap check + balance claim + insert inside one
+  transaction serialized per employee via a `$inc` touch of the new
+  `Employee.leaveOpSeq` counter (side-effect-free: never read, never
+  projected). The loser write-conflicts, retries automatically, and then sees
+  the winner in its overlap check. Pinned by three leave concurrency tests and
+  one correction-review race test.
+
+## D-39 — Seed meets the §12 minimums it previously missed
+
+*Status: accepted · audit fix (seed)*
+
+The seed had 11 employees (spec: ~25), no On Notice/Relieved employees
+(spec: ≥2/≥1), 5 templates (spec: 9), and no exit-fixture employee. Added 14
+employees (25 total, incl. 2 On Notice with LWDs, 1 Relieved with closed
+history, and an Active exit fixture), 4 templates (Freelance/Employment
+Agreement, Appraisal, General HR → 9 total), 2 fixture assets, 3 fixture
+license links, 1 fixture access item, open exits for the On Notice pair via the
+real `initiateExit` service, a completed exit for the Relieved employee, and a
+pending leave for the fixture. Consequential test updates (not weakenings):
+the history test now expects closed history for Relieved (§8.10), and the
+audit-emptiness test now expects exactly the two legitimate `exit.initiated`
+seed entries.
+
+## D-40 — HR Admin/self bank reveal; fail-closed scope ids; validated list month
+
+*Status: accepted · audit fix (P1/P5 hardening)*
+
+- §7 permits HR Admin/self to see bank details: the single-employee detail read
+  now decrypts the account number for those two parties only (`masked: false`,
+  ciphertext never present); lists and mutation echoes stay masked (§2.16).
+- `collectTeamIds` and every Employee self-scope list path now fail closed on
+  missing/malformed account links (`isValidScopeId`), returning empty results
+  instead of throwing BSONError → 500.
+- `GET /attendance` validates an optional `month` as `YYYY-MM` before it
+  reaches the anchored `$regex` filter, closing a hostile-pattern injection.
+
 ---
 
 ## Known gaps carried into later phases
@@ -624,6 +691,6 @@ AGENTS.md §7, §8.5, §8.6, §14 mandate Attendance and Leave Management:
 | ~~`rate-limit-redis` store unexercised~~ | **CLOSED (P0).** `npm run test:docker` runs the same 176 tests with `RATE_LIMIT_STORE=redis` against Redis 7 (D-04, D-16). Beyond the suite, the 5/min/IP limit, `skipSuccessfulRequests` and per-IP isolation were each measured against the live RedisStore through nginx, with the resulting per-IP bucket keys observed in Redis. | Closed |
 | ~~`/ready` could hang instead of answering~~ | **CLOSED (P0).** Probes are bounded (D-19); verified live by stopping MongoDB — 503 in 4–85 ms, `/health` unaffected. | Closed |
 | ~~403 over HTTP through the compose stack~~ | **CLOSED (P1).** P1 mounts `requirePermission` on the employee routes, so 403 is now reachable over HTTP and covered by `employees.test.ts` (Manager/Employee denials on list/create/delete, out-of-scope reads). | Closed |
-| Bank/licence field masking in list responses | Masked in normal responses; unmasked only for HR Admin or self | P2, P4 |
+| ~~Bank/licence field masking in list responses~~ | **CLOSED (audit fix).** Masked in all lists and mutation echoes; the single-employee detail read decrypts the account number for HR Admin/self only (`masked: false`, ciphertext never present). Covered by reveal tests in `employees.test.ts`. | Closed |
 | ~~Manager team scoping (recursive, depth 5)~~ | **CLOSED (P1).** `collectTeamIds` walks `reportingManagerId` breadth-first, capped at depth 5 and cycle-safe; covered by team-read, team-dashboard, and document scoping tests. | Closed |
 | Playwright E2E specs | P8 deliverable; the web workspace has no unit-test runner yet | P8 |

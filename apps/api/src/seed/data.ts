@@ -35,6 +35,8 @@ export interface SeedEmployee {
   probationEndDate?: string;
   status: EmployeeStatus;
   managerKey?: string;
+  /** Set for On Notice / Relieved fixtures (§12 exit demo data). */
+  lastWorkingDay?: string;
   compensation: {
     amount: number;
     currency: string;
@@ -209,6 +211,222 @@ export const EMPLOYEES: readonly SeedEmployee[] = [
     managerKey: 'meera',
     compensation: { amount: 65000, currency: 'INR', period: 'monthly' },
   },
+  {
+    key: 'arjun',
+    firstName: 'Arjun',
+    lastName: 'Shetty',
+    email: 'arjun.shetty@harviktech.com',
+    phone: '+91 98000 10012',
+    dob: '1994-05-17',
+    designation: 'Software Engineer',
+    department: 'Engineering',
+    employmentType: 'Full-Time',
+    dateOfJoining: '2024-06-10',
+    status: 'Active',
+    managerKey: 'rahul',
+    compensation: { amount: 88000, currency: 'INR', period: 'monthly' },
+  },
+  {
+    key: 'kavya',
+    firstName: 'Kavya',
+    lastName: 'Reddy',
+    email: 'kavya.reddy@harviktech.com',
+    phone: '+91 98000 10013',
+    dob: '1997-02-08',
+    designation: 'UI Designer',
+    department: 'Design',
+    employmentType: 'Full-Time',
+    dateOfJoining: '2024-09-02',
+    status: 'Active',
+    managerKey: 'karan',
+    compensation: { amount: 76000, currency: 'INR', period: 'monthly' },
+  },
+  {
+    key: 'aditi',
+    firstName: 'Aditi',
+    lastName: 'Kulkarni',
+    email: 'aditi.kulkarni@harviktech.com',
+    phone: '+91 98000 10014',
+    dob: '2007-05-20',
+    designation: 'Engineering Intern',
+    department: 'Engineering',
+    employmentType: 'Intern',
+    dateOfJoining: '2026-01-12',
+    probationEndDate: '2026-07-12',
+    status: 'Probation',
+    managerKey: 'rahul',
+    compensation: { amount: 18000, currency: 'INR', period: 'monthly' },
+  },
+  {
+    key: 'farhan',
+    firstName: 'Farhan',
+    lastName: 'Khan',
+    email: 'farhan.khan@harviktech.com',
+    phone: '+91 98000 10015',
+    dob: '1991-10-03',
+    designation: 'DevOps Contractor',
+    department: 'Engineering',
+    employmentType: 'Contractor',
+    dateOfJoining: '2025-04-07',
+    status: 'Active',
+    managerKey: 'ananya',
+    compensation: { amount: 950, currency: 'INR', period: 'hourly' },
+  },
+  {
+    key: 'gita',
+    firstName: 'Gita',
+    lastName: 'Nair',
+    email: 'gita.nair@harviktech.com',
+    phone: '+91 98000 10016',
+    dob: '1995-12-19',
+    designation: 'Content Strategist',
+    department: 'Sales',
+    employmentType: 'Freelancer',
+    dateOfJoining: '2024-02-05',
+    status: 'Active',
+    managerKey: 'meera',
+    compensation: { amount: 55000, currency: 'INR', period: 'fixed' },
+  },
+  {
+    key: 'harish',
+    firstName: 'Harish',
+    lastName: 'Menon',
+    email: 'harish.menon@harviktech.com',
+    phone: '+91 98000 10017',
+    dob: '1989-07-25',
+    designation: 'Senior Finance Analyst',
+    department: 'Finance',
+    employmentType: 'Full-Time',
+    dateOfJoining: '2021-08-16',
+    status: 'Active',
+    managerKey: 'meera',
+    compensation: { amount: 105000, currency: 'INR', period: 'monthly' },
+  },
+  {
+    key: 'isha',
+    firstName: 'Isha',
+    lastName: 'Gupta',
+    email: 'isha.gupta@harviktech.com',
+    phone: '+91 98000 10018',
+    dob: '1996-03-14',
+    designation: 'HR Executive',
+    department: 'HR',
+    employmentType: 'Full-Time',
+    dateOfJoining: '2023-05-22',
+    status: 'Active',
+    managerKey: 'vikram',
+    compensation: { amount: 68000, currency: 'INR', period: 'monthly' },
+  },
+  {
+    key: 'jatin',
+    firstName: 'Jatin',
+    lastName: 'Shah',
+    email: 'jatin.shah@harviktech.com',
+    phone: '+91 98000 10019',
+    dob: '1999-09-09',
+    designation: 'Support Specialist',
+    department: 'Engineering',
+    employmentType: 'Other',
+    dateOfJoining: '2023-11-06',
+    status: 'Active',
+    managerKey: 'rahul',
+    compensation: { amount: 45000, currency: 'INR', period: 'monthly' },
+  },
+  {
+    key: 'kiran',
+    firstName: 'Kiran',
+    lastName: 'Das',
+    email: 'kiran.das@harviktech.com',
+    phone: '+91 98000 10020',
+    dob: '2006-11-30',
+    designation: 'Design Intern',
+    department: 'Design',
+    employmentType: 'Intern',
+    dateOfJoining: '2026-02-02',
+    probationEndDate: '2026-08-02',
+    status: 'Probation',
+    managerKey: 'karan',
+    compensation: { amount: 15000, currency: 'INR', period: 'monthly' },
+  },
+  {
+    key: 'lakshmi',
+    firstName: 'Lakshmi',
+    lastName: 'Venkat',
+    email: 'lakshmi.venkat@harviktech.com',
+    phone: '+91 98000 10021',
+    dob: '1992-06-11',
+    designation: 'Account Executive',
+    department: 'Sales',
+    employmentType: 'Full-Time',
+    dateOfJoining: '2021-04-12',
+    status: 'On Notice',
+    lastWorkingDay: '2026-11-02',
+    managerKey: 'meera',
+    compensation: { amount: 90000, currency: 'INR', period: 'monthly' },
+  },
+  {
+    key: 'manoj',
+    firstName: 'Manoj',
+    lastName: 'Tiwari',
+    email: 'manoj.tiwari@harviktech.com',
+    phone: '+91 98000 10022',
+    dob: '1990-01-29',
+    designation: 'QA Lead',
+    department: 'Engineering',
+    employmentType: 'Full-Time',
+    dateOfJoining: '2020-09-14',
+    status: 'On Notice',
+    lastWorkingDay: '2026-10-27',
+    managerKey: 'ananya',
+    compensation: { amount: 110000, currency: 'INR', period: 'monthly' },
+  },
+  {
+    key: 'neha',
+    firstName: 'Neha',
+    lastName: 'Chopra',
+    email: 'neha.chopra@harviktech.com',
+    phone: '+91 98000 10023',
+    dob: '1993-04-02',
+    designation: 'Finance Executive',
+    department: 'Finance',
+    employmentType: 'Full-Time',
+    dateOfJoining: '2021-02-01',
+    status: 'Relieved',
+    lastWorkingDay: '2026-08-14',
+    managerKey: 'meera',
+    compensation: { amount: 78000, currency: 'INR', period: 'monthly' },
+  },
+  {
+    key: 'omprakash',
+    firstName: 'Omprakash',
+    lastName: 'Reddy',
+    email: 'omprakash.reddy@harviktech.com',
+    phone: '+91 98000 10024',
+    dob: '1995-08-16',
+    designation: 'Backend Engineer',
+    department: 'Engineering',
+    employmentType: 'Full-Time',
+    dateOfJoining: '2024-03-11',
+    status: 'Active',
+    managerKey: 'rahul',
+    compensation: { amount: 92000, currency: 'INR', period: 'monthly' },
+  },
+  {
+    key: 'priya',
+    firstName: 'Priya',
+    lastName: 'Nambiar',
+    email: 'priya.nambiar@harviktech.com',
+    phone: '+91 98000 10025',
+    dob: '1998-12-05',
+    designation: 'Junior Designer',
+    department: 'Design',
+    employmentType: 'Full-Time',
+    dateOfJoining: '2026-09-20',
+    probationEndDate: '2027-03-20',
+    status: 'Probation',
+    managerKey: 'karan',
+    compensation: { amount: 58000, currency: 'INR', period: 'monthly' },
+  },
 ];
 
 /** Never logged — only referenced from README/AGENTS docs. */
@@ -265,6 +483,8 @@ export const ASSETS: readonly SeedAsset[] = [
   { name: 'Retired ThinkPad X1', type: 'Laptop', brand: 'Lenovo', model: 'X1 Carbon Gen 7', serial: 'SN-RTP-028', purchaseDate: '2019-09-23', purchaseCost: 130000, condition: 'Fair', status: 'Retired' },
   { name: 'Lost Logitech Mouse', type: 'Mouse', brand: 'Logitech', model: 'M185', serial: 'SN-LLM-029', purchaseDate: '2022-01-17', purchaseCost: 1200, condition: 'Good', status: 'Lost' },
   { name: 'Spare Keyboard', type: 'Keyboard', brand: 'Dell', model: 'KB216', serial: 'SN-SKB-030', purchaseDate: '2023-02-28', purchaseCost: 1500, condition: 'Good', status: 'Returned' },
+  { name: 'ThinkPad E14', type: 'Laptop', brand: 'Lenovo', model: 'E14 Gen 5', serial: 'SN-TPE14-031', purchaseDate: '2024-07-08', purchaseCost: 72000, condition: 'Good', assigneeKey: 'omprakash' },
+  { name: 'Dell P2422H', type: 'Monitor', brand: 'Dell', model: 'P2422H', serial: 'SN-DP24-032', purchaseDate: '2024-07-08', purchaseCost: 19000, condition: 'Good', assigneeKey: 'omprakash' },
 ];
 
 export interface SeedLicense {
@@ -284,10 +504,10 @@ export interface SeedLicense {
 }
 
 export const LICENSES: readonly SeedLicense[] = [
-  { softwareName: 'GitHub Team', licenseType: 'Per-Seat', licenseKey: 'ghp_seed_demo_key_001', provider: 'GitHub', cost: 2400, currency: 'INR', billingCycle: 'monthly', startDate: '2023-01-01', renewal: '2027-01-01', maxSeats: 15, assigneeKeys: ['rahul', 'sneha', 'naveen'] },
+  { softwareName: 'GitHub Team', licenseType: 'Per-Seat', licenseKey: 'ghp_seed_demo_key_001', provider: 'GitHub', cost: 2400, currency: 'INR', billingCycle: 'monthly', startDate: '2023-01-01', renewal: '2027-01-01', maxSeats: 15, assigneeKeys: ['rahul', 'sneha', 'naveen', 'omprakash'] },
   { softwareName: 'Google Workspace', licenseType: 'Per-Seat', provider: 'Google', cost: 18000, currency: 'INR', billingCycle: 'monthly', startDate: '2022-06-01', renewal: '2027-06-01', maxSeats: 25, assigneeKeys: ['meera', 'vikram', 'ananya', 'ishita', 'pooja'] },
-  { softwareName: 'Slack Pro', licenseType: 'Per-Seat', licenseKey: 'xoxp-seed-demo-key-002', provider: 'Slack', cost: 9000, currency: 'INR', billingCycle: 'monthly', startDate: '2023-03-01', renewal: '2027-03-01', maxSeats: 20, assigneeKeys: ['rahul', 'karan'] },
-  { softwareName: 'Figma Professional', licenseType: 'Per-Seat', provider: 'Figma', cost: 12000, currency: 'INR', billingCycle: 'monthly', startDate: '2023-08-01', renewal: '2027-02-01', maxSeats: 5, assigneeKeys: ['karan', 'dev'] },
+  { softwareName: 'Slack Pro', licenseType: 'Per-Seat', licenseKey: 'xoxp-seed-demo-key-002', provider: 'Slack', cost: 9000, currency: 'INR', billingCycle: 'monthly', startDate: '2023-03-01', renewal: '2027-03-01', maxSeats: 20, assigneeKeys: ['rahul', 'karan', 'omprakash'] },
+  { softwareName: 'Figma Professional', licenseType: 'Per-Seat', provider: 'Figma', cost: 12000, currency: 'INR', billingCycle: 'monthly', startDate: '2023-08-01', renewal: '2027-02-01', maxSeats: 5, assigneeKeys: ['karan', 'dev', 'omprakash'] },
   { softwareName: 'JetBrains All Products', licenseType: 'Per-Seat', provider: 'JetBrains', cost: 60000, currency: 'INR', billingCycle: 'yearly', startDate: '2024-01-01', renewal: '2027-01-01', maxSeats: 10, assigneeKeys: ['rahul'] },
   { softwareName: 'Zoom Business', licenseType: 'Per-Seat', provider: 'Zoom', cost: 15000, currency: 'INR', billingCycle: 'yearly', startDate: '2024-06-01', renewal: 'near', maxSeats: 10, assigneeKeys: ['ananya'] },
   { softwareName: 'AWS Organization', licenseType: 'Site', provider: 'Amazon', cost: 50000, currency: 'INR', billingCycle: 'monthly', startDate: '2022-01-01', renewal: '2027-01-01', maxSeats: 100, assigneeKeys: ['naveen'] },
@@ -307,6 +527,7 @@ export const ACCESS_ITEMS: readonly SeedAccessItem[] = [
   { employeeKey: 'sneha', system: 'Google Workspace', identifier: 'sneha.patil@harviktech.com' },
   { employeeKey: 'karan', system: 'Slack', identifier: '@karan', linkedLicense: 'Slack Pro' },
   { employeeKey: 'rohit', system: 'VPN', identifier: 'rohit.vpn' },
+  { employeeKey: 'omprakash', system: 'GitHub org', identifier: 'omprakash-reddy' },
 ];
 
 export interface SeedDocumentTemplate {
@@ -376,6 +597,44 @@ export const DOCUMENT_TEMPLATES: readonly SeedDocumentTemplate[] = [
 <p>This has reference to your resignation from the services of <strong>{{company.name}}</strong>. We confirm that you have been relieved from your duties as <strong>{{employee.designation}}</strong> effective the close of business.</p>
 <p>All company assets and clearances have been completed in accordance with offboarding protocol.</p>
 <p>We thank you for your contributions and wish you the best in your future career.</p>`,
+  },
+  {
+    name: 'Freelance Agreement',
+    category: 'Agreement',
+    applicableEmploymentTypes: ['Freelancer', 'Contractor', 'Other'],
+    bodyHtml: `<h2>FREELANCE SERVICES AGREEMENT</h2>
+<p>This agreement is entered into as of <strong>{{today}}</strong> by and between <strong>{{company.name}}</strong> and <strong>{{employee.fullName}}</strong> ({{employee.employeeCode}}).</p>
+<p><strong>{{employee.fullName}}</strong> shall provide services as <strong>{{employee.designation}}</strong> commencing <strong>{{employee.dateOfJoining}}</strong>. Compensation terms are documented separately by Finance.</p>
+<p>Either party may terminate this engagement with written notice as per company policy.</p>`,
+  },
+  {
+    name: 'Employment Agreement',
+    category: 'Agreement',
+    applicableEmploymentTypes: ['Full-Time'],
+    bodyHtml: `<h2>EMPLOYMENT AGREEMENT</h2>
+<p>This Employment Agreement is made as of <strong>{{today}}</strong> between <strong>{{company.name}}</strong> and <strong>{{employee.fullName}}</strong> ({{employee.employeeCode}}).</p>
+<p>The Employee is appointed as <strong>{{employee.designation}}</strong> in the <strong>{{employee.department}}</strong> department effective <strong>{{employee.dateOfJoining}}</strong>.</p>
+<p>The Employee agrees to abide by all company policies, confidentiality obligations, and the code of conduct.</p>`,
+  },
+  {
+    name: 'Salary Appraisal Letter',
+    category: 'Appraisal',
+    applicableEmploymentTypes: ['Full-Time'],
+    bodyHtml: `<h2>SALARY APPRAISAL LETTER</h2>
+<p>Date: {{today}}</p>
+<p>Dear {{employee.fullName}},</p>
+<p>We are pleased to inform you that your compensation has been revised in recognition of your contributions as <strong>{{employee.designation}}</strong>.</p>
+<p>Your revised compensation is <strong>{{employee.compensation.amount}} {{employee.compensation.currency}}</strong> ({{employee.compensation.period}}).</p>
+<p>All other terms of your employment remain unchanged.</p>`,
+  },
+  {
+    name: 'General HR Letter',
+    category: 'Other',
+    applicableEmploymentTypes: ['Full-Time', 'Intern', 'Freelancer', 'Contractor', 'Other'],
+    bodyHtml: `<h2>{{company.name}} — HR CORRESPONDENCE</h2>
+<p>Date: {{today}}</p>
+<p>Dear {{employee.fullName}} ({{employee.employeeCode}}),</p>
+<p>This letter confirms your association with <strong>{{company.name}}</strong> as <strong>{{employee.designation}}</strong> since <strong>{{employee.dateOfJoining}}</strong>.</p>`,
   },
 ];
 

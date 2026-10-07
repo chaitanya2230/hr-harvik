@@ -369,4 +369,44 @@ describe('AGENTS.md §14 — ATTENDANCE', () => {
     expect(res.body.data.yearMonth).toBe('2025-07');
     expect(Array.isArray(res.body.data.records)).toBe(true);
   });
+
+  it('concurrent correction reviews — the same Pending correction is decided exactly once', async () => {
+    const empId = await employeeIdByEmail(SEEDED.softwareEngineer);
+    const date = '2025-06-11';
+
+    await Attendance.deleteMany({ employeeId: empId, date });
+    await AttendanceCorrection.deleteMany({ employeeId: empId, date });
+
+    const correction = await AttendanceCorrection.create({
+      employeeId: empId,
+      date,
+      requestedStatus: 'Present',
+      requestedWorkMode: 'Office',
+      reason: 'Concurrent review race target',
+      status: 'Pending',
+    });
+    const correctionId = String(correction._id);
+
+    const { reviewAttendanceCorrection } = await import(
+      '../../src/modules/attendance/attendance.service'
+    );
+    const reviewer = {
+      userId: manager.account.userId,
+      role: 'Manager' as const,
+      employeeId: manager.account.employeeId,
+    };
+    const attempts = await Promise.allSettled(
+      [1, 2, 3].map(() =>
+        reviewAttendanceCorrection(correctionId, { status: 'Approved' as const }, reviewer),
+      ),
+    );
+
+    expect(attempts.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.filter((r) => r.status === 'rejected')).toHaveLength(2);
+
+    // Exactly one attendance record exists despite three concurrent approvals.
+    const records = await Attendance.find({ employeeId: empId, date }).lean();
+    expect(records).toHaveLength(1);
+    expect(records[0]?.status).toBe('Present');
+  });
 });

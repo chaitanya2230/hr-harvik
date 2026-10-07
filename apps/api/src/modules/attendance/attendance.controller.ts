@@ -16,10 +16,16 @@ export async function markAttendanceHandler(req: Request, res: Response): Promis
 }
 
 export async function listAttendanceHandler(req: Request, res: Response): Promise<void> {
+  const rawMonth = req.query.month as string | undefined;
+  // The service interpolates `month` into an anchored $regex: enforce
+  // YYYY-MM here so crafted input cannot become a hostile pattern.
+  if (rawMonth !== undefined && !/^\d{4}-\d{2}$/.test(rawMonth)) {
+    throw badRequest('month query parameter must be in YYYY-MM format');
+  }
   const query = {
     employeeId: req.query.employeeId as string | undefined,
     date: req.query.date as string | undefined,
-    month: req.query.month as string | undefined,
+    month: rawMonth,
     status: req.query.status as string | undefined,
     departmentId: req.query.departmentId as string | undefined,
     page: req.query.page ? parseInt(req.query.page as string, 10) : undefined,

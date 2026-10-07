@@ -30,12 +30,26 @@ const ORGANISATION: ResolvedScope = { kind: 'organisation', employeeIds: new Set
 export const isUnrestricted = (scope: ResolvedScope): boolean => scope.kind === 'organisation';
 
 /**
+ * Fail-closed id check for self-scoping reads: a missing or malformed account
+ * link yields no rows, never a 500 from ObjectId construction. (JWT claims and
+ * DB links are valid in practice; this guards corrupt data only.)
+ */
+export function isValidScopeId(value: string | null | undefined): value is string {
+  return !!value && Types.ObjectId.isValid(value);
+}
+
+/**
  * Breadth-first walk of the reporting tree.
  *
  * A `visited` set makes this safe against a cycle that somehow reached the
  * database, so a corrupt chain degrades to a bounded search instead of hanging.
  */
 export async function collectTeamIds(rootEmployeeId: string, maxDepth = MAX_TEAM_DEPTH): Promise<Set<string>> {
+  // Fail closed on a malformed root: a broken account link must yield an
+  // empty scope (403s downstream), never a 500 from ObjectId construction.
+  if (!rootEmployeeId || !Types.ObjectId.isValid(rootEmployeeId)) {
+    return new Set<string>();
+  }
   const seen = new Set<string>([rootEmployeeId]);
   let frontier = [rootEmployeeId];
 

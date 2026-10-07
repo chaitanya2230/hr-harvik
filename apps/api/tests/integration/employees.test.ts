@@ -165,6 +165,54 @@ describe('employees (§8.2, §14)', () => {
       expect(decryptField(stored?.bankDetails?.accountNumberEnc as string)).toBe('1234567890');
     });
 
+    it('reveals bank details on detail reads for HR Admin and self only (§7)', async () => {
+      const email = uniqueEmail('bankreveal');
+      const loginEmail = uniqueEmail('bankself');
+      const created = await request(app)
+        .post('/api/v1/employees')
+        .set(...authAs.admin())
+        .send(
+          baseCreateBody({
+            email,
+            bankDetails: { accountHolder: 'Reveal Me', accountNumber: '9876543210' },
+            createLogin: { email: loginEmail, password: 'TestPass123', role: 'Employee' },
+          }),
+        );
+      expect(created.status).toBe(201);
+      const id = created.body.data.id as string;
+
+      // HR Admin detail: revealed, ciphertext never present.
+      const asAdmin = await request(app).get(`/api/v1/employees/${id}`).set(...authAs.admin());
+      expect(asAdmin.status).toBe(200);
+      expect(asAdmin.body.data.bankDetails?.masked).toBe(false);
+      expect(asAdmin.body.data.bankDetails?.accountNumber).toBe('9876543210');
+      expect(JSON.stringify(asAdmin.body)).not.toMatch(/accountNumberEnc/);
+
+      // HR Manager detail: still masked.
+      const asHrManager = await request(app).get(`/api/v1/employees/${id}`).set(...authAs.hrManager());
+      expect(asHrManager.status).toBe(200);
+      expect(asHrManager.body.data.bankDetails?.masked).toBe(true);
+      expect(asHrManager.body.data.bankDetails?.accountNumber).toBeUndefined();
+
+      // Self detail: revealed.
+      const self = await loginAs(loginEmail, 'TestPass123');
+      const asSelf = await request(app)
+        .get(`/api/v1/employees/${id}`)
+        .set(...bearer(self.accessToken));
+      expect(asSelf.status).toBe(200);
+      expect(asSelf.body.data.bankDetails?.masked).toBe(false);
+      expect(asSelf.body.data.bankDetails?.accountNumber).toBe('9876543210');
+
+      // List stays masked even for HR Admin (§2.16).
+      const list = await request(app).get('/api/v1/employees?page=1&limit=100').set(...authAs.admin());
+      const row = (list.body.data as Array<{ id: string; bankDetails?: { accountNumber?: string } }>).find(
+        (r) => r.id === id,
+      );
+      expect(row).toBeDefined();
+      expect(row?.bankDetails?.accountNumber).toBeUndefined();
+      expect(JSON.stringify(list.body)).not.toContain('9876543210');
+    });
+
     it('records an audit event on create', async () => {
       const email = uniqueEmail('audit');
       await request(app)

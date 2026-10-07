@@ -1,4 +1,4 @@
-import { Types } from 'mongoose';
+import mongoose, { Types } from 'mongoose';
 import { LeaveRequest } from './leave-request.model';
 import type { LeaveRequestDoc } from './leave-request.schema';
 import { LeaveBalance } from './leave-balance.model';
@@ -6,10 +6,10 @@ import { LeaveType } from './leave-type.model';
 import { Employee } from '../employees/employee.model';
 import { Attendance } from '../attendance/attendance.model';
 import { calculateWorkingDays } from './leave-balance.service';
-import { collectTeamIds } from '../employees/employee.scope';
+import { collectTeamIds, isValidScopeId } from '../employees/employee.scope';
 import { recordAudit } from '../audit/audit.service';
 import { invalidateDashboardCache } from '../dashboard/dashboard.cache';
-import { badRequest, forbidden, notFound, unprocessable } from '../../utils/errors';
+import { badRequest, forbidden, internalError, notFound, unprocessable } from '../../utils/errors';
 import { todayInTimeZone } from '../../utils/dates';
 import { trustedFilter } from '../../utils/mongo';
 import type { AuthAccount } from '../auth/auth.service';
@@ -50,18 +50,6 @@ export async function applyLeave(
     throw badRequest('Selected date range contains no working days (all weekends or holidays)');
   }
 
-  // AGENTS.md §8.6, §14 LEV — overlapping leave rejected
-  const overlapping = await LeaveRequest.findOne({
-    employeeId: targetEmployeeId,
-    status: trustedFilter({ $in: ['Pending', 'Approved'] }),
-    fromDate: trustedFilter({ $lte: input.toDate }),
-    toDate: trustedFilter({ $gte: input.fromDate }),
-    isDeleted: false,
-  });
-  if (overlapping) {
-    throw unprocessable('Overlapping leave request exists for the selected dates');
-  }
-
   const leaveType = await LeaveType.findOne({ _id: input.leaveTypeId, isDeleted: false });
   if (!leaveType) {
     throw notFound('Leave type not found');
@@ -76,52 +64,95 @@ export async function applyLeave(
     throw unprocessable('Medical/document proof is required for this leave type');
   }
 
-  // AGENTS.md §8.6, §14 LEV — balance checks and concurrent overdraft prevention
+  // The overlap check, balance claim and insert run inside one transaction
+  // serialized per employee: the `leaveOpSeq` touch write-conflicts concurrent
+  // applications for the same employee, the loser retries automatically and
+  // then observes the winner in its overlap check. Without this, two
+  // simultaneous overlapping applications could both pass the check and both
+  // commit (snapshot isolation hides uncommitted inserts from each other).
   const leaveYear = parseInt(input.fromDate.slice(0, 4), 10);
-  if (leaveType.isPaid) {
-    const balance = await LeaveBalance.findOne({
-      employeeId: targetEmployeeId,
-      leaveTypeId: leaveType._id,
-      year: leaveYear,
-      isDeleted: false,
-    });
+  const session = await mongoose.startSession();
+  let leaveRequest: LeaveRequestDoc;
+  try {
+    const created = await session.withTransaction(async () => {
+      await Employee.updateOne(
+        { _id: targetEmployeeId },
+        { $inc: { leaveOpSeq: 1 } },
+        { session },
+      ).exec();
 
-    if (!balance) {
-      throw unprocessable('No leave balance found for this leave type');
-    }
-
-    const available = balance.allocated + balance.carriedForward - balance.used - balance.pending;
-    if (available < workingDays) {
-      throw unprocessable('Insufficient leave balance');
-    }
-
-    // Optimistic concurrency update to lock pending balance safely against concurrent requests
-    const updatedBalance = await LeaveBalance.updateOne(
-      {
-        _id: balance._id,
+      // AGENTS.md §8.6, §14 LEV — overlapping leave rejected
+      const overlapping = await LeaveRequest.findOne({
+        employeeId: targetEmployeeId,
+        status: trustedFilter({ $in: ['Pending', 'Approved'] }),
+        fromDate: trustedFilter({ $lte: input.toDate }),
+        toDate: trustedFilter({ $gte: input.fromDate }),
         isDeleted: false,
-        pending: balance.pending,
-      },
-      { $inc: { pending: workingDays } },
-    );
+      })
+        .session(session)
+        .exec();
+      if (overlapping) {
+        throw unprocessable('Overlapping leave request exists for the selected dates');
+      }
 
-    if (updatedBalance.matchedCount === 0) {
-      throw unprocessable('Concurrent leave applications cannot overdraw balance');
+      // AGENTS.md §8.6, §14 LEV — balance checks and concurrent overdraft prevention
+      if (leaveType.isPaid) {
+        const balance = await LeaveBalance.findOne({
+          employeeId: targetEmployeeId,
+          leaveTypeId: leaveType._id,
+          year: leaveYear,
+          isDeleted: false,
+        })
+          .session(session)
+          .exec();
+
+        if (!balance) {
+          throw unprocessable('No leave balance found for this leave type');
+        }
+
+        const available = balance.allocated + balance.carriedForward - balance.used - balance.pending;
+        if (available < workingDays) {
+          throw unprocessable('Insufficient leave balance');
+        }
+
+        // Optimistic concurrency update to lock pending balance safely against concurrent requests
+        const updatedBalance = await LeaveBalance.updateOne(
+          {
+            _id: balance._id,
+            isDeleted: false,
+            pending: balance.pending,
+          },
+          { $inc: { pending: workingDays } },
+          { session },
+        ).exec();
+
+        if (updatedBalance.matchedCount === 0) {
+          throw unprocessable('Concurrent leave applications cannot overdraw balance');
+        }
+      }
+
+      const doc = new LeaveRequest({
+        employeeId: new Types.ObjectId(targetEmployeeId),
+        leaveTypeId: leaveType._id,
+        fromDate: input.fromDate,
+        toDate: input.toDate,
+        halfDay: input.halfDay,
+        days: workingDays,
+        reason: input.reason,
+        status: 'Pending',
+        documentId: input.documentId ? new Types.ObjectId(input.documentId) : null,
+        createdBy: actor.userId ? new Types.ObjectId(actor.userId) : null,
+      });
+      await doc.save({ session });
+      return doc;
+    });
+    if (!created) {
+      throw internalError('Leave application could not be completed');
     }
+    leaveRequest = created;
+  } finally {
+    await session.endSession();
   }
-
-  const leaveRequest = await LeaveRequest.create({
-    employeeId: new Types.ObjectId(targetEmployeeId),
-    leaveTypeId: leaveType._id,
-    fromDate: input.fromDate,
-    toDate: input.toDate,
-    halfDay: input.halfDay,
-    days: workingDays,
-    reason: input.reason,
-    status: 'Pending',
-    documentId: input.documentId ? new Types.ObjectId(input.documentId) : null,
-    createdBy: actor.userId ? new Types.ObjectId(actor.userId) : null,
-  });
 
   await recordAudit({
     actorId: actor.userId ? new Types.ObjectId(actor.userId) : null,
@@ -169,13 +200,32 @@ export async function reviewLeave(
   const leaveType = await LeaveType.findById(request.leaveTypeId);
   const leaveYear = parseInt(request.fromDate.slice(0, 4), 10);
 
-  if (input.status === 'Rejected') {
-    request.status = 'Rejected';
-    request.decisionNote = input.decisionNote ?? null;
-    request.approverId = actor.userId ? new Types.ObjectId(actor.userId) : null;
-    request.decidedAt = new Date();
-    await request.save();
+  // Atomic state claim: the status flip and the decision metadata commit as
+  // one operation guarded on `Pending`, so two concurrent reviewers cannot
+  // both approve the same request (which would double-deduct the balance and
+  // double-write attendance). The loser observes the decided state below.
+  const claimed = await LeaveRequest.findOneAndUpdate(
+    { _id: request._id, status: 'Pending', isDeleted: false },
+    {
+      $set: {
+        status: input.status,
+        decisionNote: input.decisionNote ?? null,
+        approverId: actor.userId ? new Types.ObjectId(actor.userId) : null,
+        decidedAt: new Date(),
+      },
+    },
+    { new: true },
+  ).exec();
 
+  if (!claimed) {
+    const current = await LeaveRequest.findById(request._id).select('status').lean().exec();
+    if (!current) {
+      throw notFound('Leave request not found');
+    }
+    throw badRequest(`Leave request is already ${current.status}`);
+  }
+
+  if (input.status === 'Rejected') {
     // Restore pending balance if paid
     if (leaveType?.isPaid) {
       await LeaveBalance.updateOne(
@@ -184,12 +234,6 @@ export async function reviewLeave(
       );
     }
   } else if (input.status === 'Approved') {
-    request.status = 'Approved';
-    request.decisionNote = input.decisionNote ?? null;
-    request.approverId = actor.userId ? new Types.ObjectId(actor.userId) : null;
-    request.decidedAt = new Date();
-    await request.save();
-
     // Deduct pending, add to used atomically
     if (leaveType?.isPaid) {
       await LeaveBalance.updateOne(
@@ -226,12 +270,12 @@ export async function reviewLeave(
     actorId: actor.userId ? new Types.ObjectId(actor.userId) : null,
     action: 'STATUS_CHANGE',
     entityType: 'LeaveRequest',
-    entityId: request._id,
-    after: request.toObject(),
+    entityId: claimed._id,
+    after: claimed.toObject(),
   });
 
   await invalidateDashboardCache();
-  return request;
+  return claimed;
 }
 
 export async function cancelLeave(
@@ -258,9 +302,17 @@ export async function cancelLeave(
   const leaveYear = parseInt(request.fromDate.slice(0, 4), 10);
   const today = todayInTimeZone();
 
+  // Atomic state claims (same rationale as reviewLeave): exactly one
+  // concurrent cancellation wins; the loser observes the decided state.
   if (request.status === 'Pending') {
-    request.status = 'Cancelled';
-    await request.save();
+    const claimed = await LeaveRequest.findOneAndUpdate(
+      { _id: request._id, status: 'Pending', isDeleted: false },
+      { $set: { status: 'Cancelled' } },
+      { new: true },
+    ).exec();
+    if (!claimed) {
+      throw badRequest('Leave request is no longer pending and cannot be cancelled');
+    }
 
     if (leaveType?.isPaid) {
       await LeaveBalance.updateOne(
@@ -268,14 +320,33 @@ export async function cancelLeave(
         { $inc: { pending: -request.days } },
       );
     }
-  } else if (request.status === 'Approved') {
+
+    await recordAudit({
+      actorId: actor.userId ? new Types.ObjectId(actor.userId) : null,
+      action: 'STATUS_CHANGE',
+      entityType: 'LeaveRequest',
+      entityId: claimed._id,
+      after: claimed.toObject(),
+    });
+
+    await invalidateDashboardCache();
+    return claimed;
+  }
+
+  if (request.status === 'Approved') {
     // AGENTS.md §14 LEV — past cancellation rejected; future restores balance
     if (request.fromDate <= today) {
       throw unprocessable('Cannot cancel past or ongoing approved leave');
     }
 
-    request.status = 'Cancelled';
-    await request.save();
+    const claimed = await LeaveRequest.findOneAndUpdate(
+      { _id: request._id, status: 'Approved', isDeleted: false },
+      { $set: { status: 'Cancelled' } },
+      { new: true },
+    ).exec();
+    if (!claimed) {
+      throw badRequest('Leave request is no longer approved and cannot be cancelled');
+    }
 
     if (leaveType?.isPaid) {
       await LeaveBalance.updateOne(
@@ -291,18 +362,21 @@ export async function cancelLeave(
       status: trustedFilter({ $in: ['Leave', 'Half Day'] }),
       source: 'LeaveSync',
     });
+
+    await recordAudit({
+      actorId: actor.userId ? new Types.ObjectId(actor.userId) : null,
+      action: 'STATUS_CHANGE',
+      entityType: 'LeaveRequest',
+      entityId: claimed._id,
+      after: claimed.toObject(),
+    });
+
+    await invalidateDashboardCache();
+    return claimed;
   }
 
-  await recordAudit({
-    actorId: actor.userId ? new Types.ObjectId(actor.userId) : null,
-    action: 'STATUS_CHANGE',
-    entityType: 'LeaveRequest',
-    entityId: request._id,
-    after: request.toObject(),
-  });
-
-  await invalidateDashboardCache();
-  return request;
+  // Unreachable: terminal states rejected above, but kept for exhaustiveness.
+  throw badRequest(`Cannot cancel leave request in status ${request.status}`);
 }
 
 export async function listLeaveRequests(
@@ -327,7 +401,7 @@ export async function listLeaveRequests(
   if (query.toDate) filter.fromDate = trustedFilter({ $lte: query.toDate });
 
   if (actor.role === 'Employee') {
-    if (!actor.employeeId) return { data: [], total: 0, page, limit };
+    if (!isValidScopeId(actor.employeeId)) return { data: [], total: 0, page, limit };
     filter.employeeId = new Types.ObjectId(actor.employeeId);
   } else if (actor.role === 'Manager') {
     if (!actor.employeeId) return { data: [], total: 0, page, limit };
@@ -385,7 +459,7 @@ export async function getTeamCalendar(
   };
 
   if (actor.role === 'Employee') {
-    if (!actor.employeeId) return [];
+    if (!isValidScopeId(actor.employeeId)) return [];
     filter.employeeId = new Types.ObjectId(actor.employeeId);
   } else if (actor.role === 'Manager') {
     if (!actor.employeeId) return [];
